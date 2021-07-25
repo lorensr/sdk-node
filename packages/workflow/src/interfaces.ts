@@ -1,4 +1,5 @@
 import { coresdk } from '@temporalio/proto/lib/coresdk';
+import { WorkflowOptions } from '@temporalio/common';
 export * from './dependencies';
 
 /**
@@ -77,4 +78,11 @@ export interface ContinueAsNewOptions {
    * Searchable attributes to attach to next Workflow run
    */
   searchAttributes?: Record<string, any>;
+}
+
+export type ChildWorkflowCancellationType = coresdk.child_workflow_cancellation_type.ChildWorkflowCancellationType;
+
+export interface ChildWorkflowOptions extends WorkflowOptions {
+  namespace?: string;
+  cancellationType?: ChildWorkflowCancellationType;
 }

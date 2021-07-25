@@ -6,7 +6,7 @@
  * @module
  */
 
-import { ContinueAsNewOptions } from './interfaces';
+import { ChildWorkflowOptions, ContinueAsNewOptions } from './interfaces';
 import { ActivityOptions, Headers, Next } from '@temporalio/common';
 
 export { Next, Headers };
@@ -57,6 +57,15 @@ export interface ActivityInput {
   readonly activityType: string;
   readonly args: unknown[];
   readonly options: ActivityOptions;
+  readonly headers: Headers;
+  readonly seq: number;
+}
+
+/** Input for WorkflowOutboundCallsInterceptor.startChildWorkflowExecution */
+export interface StartChildWorkflowExecutionInput {
+  readonly workflowType: string;
+  readonly args: unknown[];
+  readonly options: ChildWorkflowOptions;
   readonly headers: Headers;
   readonly seq: number;
 }

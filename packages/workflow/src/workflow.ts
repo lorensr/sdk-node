@@ -10,7 +10,7 @@ import {
 } from '@temporalio/common';
 import { ContinueAsNew, ContinueAsNewOptions, ExternalDependencies, WorkflowInfo } from './interfaces';
 import { state } from './internals';
-import { ActivityInput, TimerInput } from './interceptors';
+import { ActivityInput, StartChildWorkflowExecutionInput, TimerInput } from './interceptors';
 import { CancellationScope, registerSleepImplementation } from './cancellation-scope';
 
 // Avoid a circular dependency
@@ -28,7 +28,7 @@ function timerNextHandler(input: TimerInput) {
     }
     if (scope.cancellable) {
       scope.cancelRequested.catch((err) => {
-        if (!state.completions.delete(input.seq)) {
+        if (!state.completions.delete(`${input.seq}`)) {
           return; // Already resolved
         }
         state.commands.push({
@@ -39,7 +39,7 @@ function timerNextHandler(input: TimerInput) {
         reject(err);
       });
     }
-    state.completions.set(input.seq, {
+    state.completions.set(`${input.seq}`, {
       resolve,
       reject,
     });
@@ -118,7 +118,7 @@ async function scheduleActivityNextHandler({
         });
       });
     }
-    state.completions.set(seq, {
+    state.completions.set(`${seq}`, {
       resolve,
       reject,
     });
@@ -171,6 +171,63 @@ export function scheduleActivity<R>(
     args,
     seq,
   }) as Promise<R>;
+}
+
+// TODO: don't export
+export async function startChildWorkflowExecutionNextHandler({
+  options,
+  args,
+  headers,
+  workflowType,
+}: StartChildWorkflowExecutionInput): Promise<unknown> {
+  const workflowId = options.workflowId ?? uuid4();
+
+  // validateActivityOptions(options);
+  const argsAsPayloads = await state.dataConverter.toPayloads(...args);
+  return new Promise((resolve, reject) => {
+    const scope = CancellationScope.current();
+    if (scope.consideredCancelled) {
+      scope.cancelRequested.catch(reject);
+      return;
+    }
+    if (scope.cancellable) {
+      scope.cancelRequested.catch(() => {
+        state.commands.push({
+          requestCancelActivity: {
+            activityId: workflowId,
+          },
+        });
+      });
+    }
+    state.completions.set(workflowId, {
+      resolve,
+      reject,
+    });
+    state.commands.push({
+      startChildWorkflowExecution: {
+        workflowId,
+        workflowType,
+        input: argsAsPayloads,
+        retryPolicy: options.retryPolicy
+          ? {
+              maximumAttempts: options.retryPolicy.maximumAttempts,
+              initialInterval: options.retryPolicy.initialInterval,
+              maximumInterval: options.retryPolicy.maximumInterval,
+              backoffCoefficient: options.retryPolicy.backoffCoefficient,
+              // TODO: nonRetryableErrorTypes
+            }
+          : undefined,
+        taskQueue: options.taskQueue || state.info?.taskQueue,
+        workflowExecutionTimeout: msOptionalToTs(options.workflowExecutionTimeout),
+        workflowRunTimeout: msOptionalToTs(options.workflowRunTimeout),
+        workflowTaskTimeout: msOptionalToTs(options.workflowTaskTimeout),
+        namespace: options.namespace,
+        header: Object.fromEntries(headers.entries()),
+        cancellationType: options.cancellationType,
+        // memo: Object.fromEntries(options.memo),
+      },
+    });
+  });
 }
 
 function activityInfo(activity: string | [string, string] | ActivityFunction<any, any>): ActivityInfo {

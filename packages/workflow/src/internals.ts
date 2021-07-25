@@ -90,7 +90,7 @@ export class Activator implements ActivationHandler {
 
   public async resolveActivity(activation: coresdk.workflow_activation.IResolveActivity): Promise<void> {
     if (!activation.result) {
-      throw new Error('Got CompleteActivity activation with no result');
+      throw new Error('Got ResolveActivity activation with no result');
     }
     const { resolve, reject } = consumeCompletion(idToSeq(activation, 'activityId'));
     if (activation.result.completed) {
@@ -104,6 +104,32 @@ export class Activator implements ActivationHandler {
     } else if (activation.result.canceled) {
       // TODO: Use `ActivityFailure` instead
       reject(new CancelledError('Activity cancelled'));
+    }
+  }
+
+  public notifyChildWorkflowExecutionStarted(
+    _activation: coresdk.workflow_activation.INotifyChildWorkflowExecutionStarted
+  ): void {
+    // TODO
+  }
+
+  public async resolveChildWorkflowExecution(
+    activation: coresdk.workflow_activation.IResolveChildWorkflowExecution
+  ): Promise<void> {
+    if (!activation.result) {
+      throw new Error('Got ResolveChildWorkflowExecution activation with no result');
+    }
+    const { resolve, reject } = consumeCompletion(idToSeq(activation, 'workflowId'));
+    if (activation.result.completed) {
+      const completed = activation.result.completed;
+      const result = completed.result ? await state.dataConverter.fromPayload(completed.result) : undefined;
+      resolve(result);
+    } else if (activation.result.failed) {
+      reject(new Error(activation.result.failed.failure?.message ?? undefined));
+    } else if (activation.result.cancelled) {
+      reject(new CancelledError('Child workflow cancelled'));
+    } else if (activation.result.terminated) {
+      reject(new Error('Child workflow terminated'));
     }
   }
 
@@ -177,7 +203,7 @@ export interface ExternalCall {
   fnName: string;
   args: any[];
   /** Optional in case applyMode is ASYNC_IGNORED */
-  seq?: number;
+  seq?: string;
 }
 
 /**
@@ -193,7 +219,7 @@ export class State {
   /**
    * Map of task sequence to a Completion
    */
-  public readonly completions: Map<number, Completion> = new Map();
+  public readonly completions: Map<string, Completion> = new Map();
 
   /**
    * Overridden on WF initialization
@@ -323,19 +349,19 @@ async function failQuery(queryId: string, error: any) {
   });
 }
 
-export function consumeCompletion(taskSeq: number): Completion {
-  const completion = state.completions.get(taskSeq);
+export function consumeCompletion(taskId: string): Completion {
+  const completion = state.completions.get(taskId);
   if (completion === undefined) {
-    throw new IllegalStateError(`No completion for taskSeq ${taskSeq}`);
+    throw new IllegalStateError(`No completion for taskId ${taskId}`);
   }
-  state.completions.delete(taskSeq);
+  state.completions.delete(taskId);
   return completion;
 }
 
-function idToSeq<T extends Record<string, any>>(activation: T, attr: keyof T) {
+function idToSeq<T extends Record<string, any>>(activation: T, attr: keyof T): string {
   const id = activation[attr];
   if (!id) {
     throw new TypeError(`Got activation with no ${attr}`);
   }
-  return parseInt(id);
+  return id;
 }

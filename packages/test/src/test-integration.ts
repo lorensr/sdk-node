@@ -135,6 +135,13 @@ if (RUN_INTEGRATION_TESTS) {
     );
   });
 
+  test('child-workflow-invoke', async (t) => {
+    const client = new WorkflowClient();
+    const workflow = client.stub<Empty>('child-workflow-invoke', { taskQueue: 'test' });
+    await workflow.execute();
+    t.pass();
+  });
+
   test('simple-query', async (t) => {
     const client = new WorkflowClient();
     const workflow = client.stub<SimpleQuery>('simple-query', { taskQueue: 'test' });

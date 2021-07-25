@@ -1,4 +1,4 @@
-import * as iface from '@temporalio/proto/lib/temporal';
+import { coresdk, google } from '@temporalio/proto/lib/coresdk';
 import { msToTs } from './time';
 
 // Copied from https://github.com/temporalio/sdk-java/blob/master/temporal-sdk/src/main/java/io/temporal/client/WorkflowOptions.java
@@ -19,7 +19,7 @@ export interface BaseWorkflowOptions {
    *   ALLOW_DUPLICATE allows new run independently of the previous run closure status.
    *   REJECT_DUPLICATE doesn't allow new run independently of the previous run closure status.
    */
-  workflowIdReusePolicy?: iface.temporal.api.enums.v1.WorkflowIdReusePolicy;
+  workflowIdReusePolicy?: coresdk.common.WorkflowIdReusePolicy;
 
   /**
    * Task queue to use for workflow tasks. It should match a task queue specified when creating a
@@ -27,7 +27,7 @@ export interface BaseWorkflowOptions {
    */
   taskQueue: string;
 
-  retryPolicy?: iface.temporal.api.common.v1.IRetryPolicy;
+  retryPolicy?: coresdk.common.IRetryPolicy;
 
   /**
    * Optional cron schedule for Workflow. If a cron schedule is specified, the Workflow will run
@@ -91,9 +91,9 @@ export type WorkflowOptionsWithDefaults = WorkflowOptions & RequiredWorkflowOpti
 
 export type CompiledWorkflowOptions = BaseWorkflowOptions &
   RequiredWorkflowOptions & {
-    workflowExecutionTimeout?: iface.google.protobuf.IDuration;
-    workflowRunTimeout?: iface.google.protobuf.IDuration;
-    workflowTaskTimeout?: iface.google.protobuf.IDuration;
+    workflowExecutionTimeout?: google.protobuf.IDuration;
+    workflowRunTimeout?: google.protobuf.IDuration;
+    workflowTaskTimeout?: google.protobuf.IDuration;
   };
 
 export function compileWorkflowOptions({

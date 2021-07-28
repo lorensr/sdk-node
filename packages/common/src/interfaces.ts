@@ -44,4 +44,47 @@ export interface RetryOptions {
    * @format {@link https://www.npmjs.com/package/ms | ms} formatted string or number of milliseconds
    */
   maximumInterval?: string | number;
+
+  /**
+   * List of application failures types to not retry.
+   */
+  nonRetryableErrorTypes?: string[];
+}
+
+/**
+ * Like {@link RetryOptions} but with all intervals in numbers instead of ms formatted strings.
+ * This is an actual retry policy the service uses.
+ * It can be different from the one provided (or not) during activity scheduling
+ * as the service can override the provided one in case its values are not specified
+ * or exceed configured system limits.
+ */
+export interface RetryPolicy {
+  /**
+   * Coefficient used to calculate the next retry interval.
+   * The next retry interval is previous interval multiplied by this coefficient.
+   * @minimum 1
+   */
+  backoffCoefficient?: number;
+  /**
+   * Interval of the first retry in milliseconds.
+   * If coefficient is 1 then it is used for all retries
+   */
+  initialInterval?: number;
+  /**
+   * Maximum number of attempts. When exceeded the retries stop even if not expired yet.
+   * @minimum 1
+   * @default Infinity
+   */
+  maximumAttempts?: number;
+  /**
+   * Maximum interval between retries.
+   * Exponential backoff leads to interval increase.
+   * This value is the cap of the increase.
+   */
+  maximumInterval?: number;
+
+  /**
+   * List of application failures types to not retry.
+   */
+  nonRetryableErrorTypes: string[];
 }

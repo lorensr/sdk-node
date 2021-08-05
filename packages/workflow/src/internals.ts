@@ -6,6 +6,7 @@ import {
   composeInterceptors,
   errorToFailure,
   ensureTemporalFailure,
+  failureToError,
   optionalFailureToOptionalError,
   IllegalStateError,
   Workflow,
@@ -18,7 +19,12 @@ import { coresdk } from '@temporalio/proto/lib/coresdk';
 import { alea, RNG } from './alea';
 import { ContinueAsNew, ExternalDependencies, WorkflowInfo } from './interfaces';
 import { SignalInput, WorkflowInput, WorkflowInterceptors } from './interceptors';
-import { CancelledError, DeterminismViolationError, WorkflowCancelledError } from './errors';
+import {
+  CancelledError,
+  DeterminismViolationError,
+  WorkflowCancelledError,
+  WorkflowExecutionAlreadyStartedError,
+} from './errors';
 import { ROOT_SCOPE } from './cancellation-scope';
 
 export type ResolveFunction<T = any> = (val: T) => any;
@@ -90,7 +96,7 @@ export class Activator implements ActivationHandler {
 
   public async resolveActivity(activation: coresdk.workflow_activation.IResolveActivity): Promise<void> {
     if (!activation.result) {
-      throw new Error('Got ResolveActivity activation with no result');
+      throw new TypeError('Got ResolveActivity activation with no result');
     }
     const { resolve, reject } = consumeCompletion(idToSeq(activation, 'activityId'));
     if (activation.result.completed) {
@@ -107,25 +113,52 @@ export class Activator implements ActivationHandler {
     }
   }
 
-  public notifyChildWorkflowExecutionStarted(
-    _activation: coresdk.workflow_activation.INotifyChildWorkflowExecutionStarted
+  public resolveChildWorkflowExecutionStart(
+    activation: coresdk.workflow_activation.IResolveChildWorkflowExecutionStart
   ): void {
-    // TODO
+    const { resolve, reject } = consumeCompletion(`start-${idToSeq(activation, 'workflowId')}`);
+    if (activation.succeeded) {
+      resolve(activation.succeeded.runId);
+    } else if (activation.failed) {
+      if (
+        activation.failed.cause !==
+        coresdk.common.StartChildWorkflowExecutionFailedCause
+          .START_CHILD_WORKFLOW_EXECUTION_FAILED_CAUSE_WORKFLOW_ALREADY_EXISTS
+      ) {
+        throw new IllegalStateError('Got unknown StartChildWorkflowExecutionFailedCause');
+      }
+      if (!(activation.workflowId && activation.failed?.workflowType)) {
+        throw new TypeError('');
+      }
+      reject(
+        new WorkflowExecutionAlreadyStartedError(
+          'Workflow execution already started',
+          activation.workflowId,
+          activation.failed.workflowType
+        )
+      );
+    } else {
+      throw new TypeError('Got ResolveChildWorkflowExecutionStart with no status');
+    }
   }
 
   public async resolveChildWorkflowExecution(
     activation: coresdk.workflow_activation.IResolveChildWorkflowExecution
   ): Promise<void> {
     if (!activation.result) {
-      throw new Error('Got ResolveChildWorkflowExecution activation with no result');
+      throw new TypeError('Got ResolveChildWorkflowExecution activation with no result');
     }
-    const { resolve, reject } = consumeCompletion(idToSeq(activation, 'workflowId'));
+    const { resolve, reject } = consumeCompletion(`complete-${idToSeq(activation, 'workflowId')}`);
     if (activation.result.completed) {
       const completed = activation.result.completed;
       const result = completed.result ? await state.dataConverter.fromPayload(completed.result) : undefined;
       resolve(result);
     } else if (activation.result.failed) {
-      reject(new Error(activation.result.failed.failure?.message ?? undefined));
+      const { failure } = activation.result.failed;
+      if (failure === undefined || failure === null) {
+        throw new TypeError('Got failed result with no failure attribute');
+      }
+      reject(await failureToError(failure, state.dataConverter));
     } else if (activation.result.cancelled) {
       reject(new CancelledError('Child workflow cancelled'));
     } else if (activation.result.terminated) {
@@ -188,7 +221,7 @@ export class Activator implements ActivationHandler {
 
   public updateRandomSeed(activation: coresdk.workflow_activation.IUpdateRandomSeed): void {
     if (!activation.randomnessSeed) {
-      throw new Error('Expected activation with randomnessSeed attribute');
+      throw new TypeError('Expected activation with randomnessSeed attribute');
     }
     state.random = alea(activation.randomnessSeed.toBytes());
   }

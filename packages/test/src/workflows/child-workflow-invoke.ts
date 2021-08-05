@@ -1,16 +1,17 @@
-import { startChildWorkflowExecutionNextHandler } from '@temporalio/workflow/lib/workflow';
-import { state } from '@temporalio/workflow/lib/internals';
-import { sleep } from '@temporalio/workflow';
+/**
+ * Tests the happy path of starting and awaiting a child workflow
+ * @module
+ */
 
-export async function main(): Promise<void> {
-  await startChildWorkflowExecutionNextHandler({
-    args: [],
-    workflowType: 'sync',
-    seq: state.nextSeq++,
-    headers: new Map(),
-    options: {
-      taskQueue: 'test',
-    },
+import { Context } from '@temporalio/workflow';
+import * as sync from './sync';
+
+export async function main(): Promise<{ workflowId: string; runId: string; execResult: string; result: string }> {
+  const child = Context.child<typeof sync>('sync', {
+    taskQueue: 'test',
   });
-  await sleep(3000);
+  const execResult = await Context.child<typeof sync>('sync', {
+    taskQueue: 'test',
+  }).execute();
+  return { workflowId: child.workflowId, runId: await child.start(), result: await child.result(), execResult };
 }

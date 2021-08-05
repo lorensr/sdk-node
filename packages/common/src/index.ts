@@ -8,6 +8,7 @@ export * from './failure';
 export * from './interfaces';
 export * from './activity-options';
 export * from './workflow-options';
+export * from './workflow-stub';
 export * from './converter/data-converter';
 export * from './interceptors';
 export * from './time';

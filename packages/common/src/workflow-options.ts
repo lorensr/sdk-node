@@ -1,6 +1,10 @@
 import { coresdk, google } from '@temporalio/proto/lib/coresdk';
 import { msToTs } from './time';
 
+export type WorkflowIdReusePolicy = coresdk.common.WorkflowIdReusePolicy;
+export const WorkflowIdReusePolicy = coresdk.common.WorkflowIdReusePolicy;
+export type RetryPolicy = coresdk.common.IRetryPolicy;
+
 // Copied from https://github.com/temporalio/sdk-java/blob/master/temporal-sdk/src/main/java/io/temporal/client/WorkflowOptions.java
 export interface BaseWorkflowOptions {
   /**
@@ -19,7 +23,7 @@ export interface BaseWorkflowOptions {
    *   ALLOW_DUPLICATE allows new run independently of the previous run closure status.
    *   REJECT_DUPLICATE doesn't allow new run independently of the previous run closure status.
    */
-  workflowIdReusePolicy?: coresdk.common.WorkflowIdReusePolicy;
+  workflowIdReusePolicy?: WorkflowIdReusePolicy;
 
   /**
    * Task queue to use for workflow tasks. It should match a task queue specified when creating a

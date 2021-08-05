@@ -81,8 +81,10 @@ export interface ContinueAsNewOptions {
 }
 
 export type ChildWorkflowCancellationType = coresdk.child_workflow_cancellation_type.ChildWorkflowCancellationType;
+export type ParentClosePolicy = coresdk.common.ParentClosePolicy;
 
 export interface ChildWorkflowOptions extends WorkflowOptions {
   namespace?: string;
   cancellationType?: ChildWorkflowCancellationType;
+  parentClosePolicy?: ParentClosePolicy;
 }

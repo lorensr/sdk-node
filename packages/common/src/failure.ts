@@ -6,6 +6,7 @@ export type TimeoutType = coresdk.common.TimeoutType;
 export const TimeoutType = coresdk.common.TimeoutType;
 export type RetryState = coresdk.common.RetryState;
 export const RetryState = coresdk.common.RetryState;
+export type WorkflowExecution = coresdk.common.IWorkflowExecution;
 
 /**
  * Represents failures that can cross Workflow and Activity boundaries.
@@ -194,6 +195,27 @@ export class ActivityFailure extends TemporalFailure {
   }
 }
 
+export class ChildWorkflowFailure extends TemporalFailure {
+  public constructor(
+    public readonly namespace: string | undefined,
+    public readonly execution: WorkflowExecution,
+    public readonly workflowType: string,
+    public readonly retryState: RetryState,
+    cause?: Error
+  ) {
+    super(ChildWorkflowFailure.getMessage(namespace, execution, workflowType, retryState), undefined, cause);
+  }
+
+  public static getMessage(
+    namespace: string | undefined,
+    execution: WorkflowExecution,
+    workflowType: string,
+    retryState: RetryState
+  ): string {
+    return `namespace='${namespace}', ${execution}, workflowType='${workflowType}', retryState='${retryState}'`;
+  }
+}
+
 /**
  * Converts an error to a Failure proto message if defined or returns undefined
  */
@@ -245,6 +267,15 @@ export async function errorToFailure(err: unknown, dataConverter: DataConverter)
         ...base,
         activityFailureInfo: {
           ...err,
+        },
+      };
+    }
+    if (err instanceof ChildWorkflowFailure) {
+      return {
+        ...base,
+        childWorkflowExecutionFailureInfo: {
+          ...err,
+          workflowExecution: err.execution,
         },
       };
     }
@@ -388,6 +419,19 @@ export async function failureToErrorInner(
       'ResetWorkflow',
       false,
       await arrayFromPayloads(dataConverter, failure.resetWorkflowFailureInfo.lastHeartbeatDetails),
+      await optionalFailureToOptionalError(failure.cause, dataConverter)
+    );
+  }
+  if (failure.childWorkflowExecutionFailureInfo) {
+    const { namespace, workflowType, workflowExecution, retryState } = failure.childWorkflowExecutionFailureInfo;
+    if (!(workflowType && workflowExecution)) {
+      throw new TypeError('Missing attributes on childWorkflowExecutionFailureInfo');
+    }
+    return new ChildWorkflowFailure(
+      namespace ?? undefined,
+      workflowExecution,
+      workflowType,
+      retryState ?? coresdk.common.RetryState.RETRY_STATE_UNSPECIFIED,
       await optionalFailureToOptionalError(failure.cause, dataConverter)
     );
   }

@@ -10,6 +10,7 @@ import {
   TemporalFailure,
   ServerFailure,
   ApplicationFailure,
+  ChildWorkflowFailure,
   ActivityFailure,
   CancelledFailure,
   TimeoutFailure,
@@ -156,6 +157,19 @@ export async function failureToErrorInner(
       'ResetWorkflow',
       false,
       await arrayFromPayloads(dataConverter, failure.resetWorkflowFailureInfo.lastHeartbeatDetails?.payloads),
+      await optionalFailureToOptionalError(failure.cause, dataConverter)
+    );
+  }
+  if (failure.childWorkflowExecutionFailureInfo) {
+    const { namespace, workflowType, workflowExecution, retryState } = failure.childWorkflowExecutionFailureInfo;
+    if (!(workflowType && workflowType.name && workflowExecution)) {
+      throw new TypeError('Missing attributes on childWorkflowExecutionFailureInfo');
+    }
+    return new ChildWorkflowFailure(
+      namespace ?? undefined,
+      workflowExecution,
+      workflowType.name,
+      retryState ?? coresdk.common.RetryState.RETRY_STATE_UNSPECIFIED,
       await optionalFailureToOptionalError(failure.cause, dataConverter)
     );
   }

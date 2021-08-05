@@ -67,7 +67,6 @@ export interface StartChildWorkflowExecutionInput {
   readonly args: unknown[];
   readonly options: ChildWorkflowOptions;
   readonly headers: Headers;
-  readonly seq: number;
 }
 
 /** Input for WorkflowOutboundCallsInterceptor.startTimer */

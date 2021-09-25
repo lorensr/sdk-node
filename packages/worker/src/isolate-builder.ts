@@ -95,21 +95,26 @@ export class WorkflowIsolateBuilder {
       .map((v) => JSON.stringify(v))
       .join(', ');
 
+    console.log('bundlePaths', bundlePaths);
+    console.log(JSON.stringify(this.workflowsPath));
+
     const code = dedent`
+      console.log('INSIDE src/main.js')
       const api = require('@temporalio/workflow/lib/worker-interface');
 
       // Bundle all Workflows and interceptor modules for lazy evaluation
       globalThis.document = api.mockBrowserDocumentForWebpack();
       // See https://webpack.js.org/api/module-methods/#requireensure
-      require.ensure([${bundlePaths}], function() {});
+      require.ensure([${bundlePaths}], function() {}, function(e) {console.error('FAILED', e)});
       delete globalThis.document;
 
       api.overrideGlobals();
       api.setRequireFunc(
         (path, name) => {
-          if (path !== undefined) {
-            return require(${JSON.stringify(this.workflowsPath)} + '${path.sep}' + path)[name];
-          }
+          console.log('inside setRequireFunc', path, name)
+          // if (path !== undefined) {
+          //   return require(${JSON.stringify(this.workflowsPath)} + '${path.sep}' + path)[name];
+          // }
           return require(${JSON.stringify(this.workflowsPath)})[name];
         }
       );
@@ -128,6 +133,7 @@ export class WorkflowIsolateBuilder {
    * Run webpack
    */
   protected async bundle(filesystem: typeof unionfs.ufs, entry: string, distDir: string): Promise<void> {
+    console.log('entry:', entry);
     const compiler = webpack({
       resolve: {
         modules: [this.nodeModulesPath],

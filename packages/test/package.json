@@ -7,7 +7,7 @@
     "build": "tsc --build",
     "build.watch": "tsc --build --watch",
     "test": "ava ./lib/test-*.js",
-    "test.watch": "ava --watch ./lib/test-*.js"
+    "test.watch": "ava --watch ./lib/test-worker-no-ac*.js"
   },
   "ava": {
     "timeout": "60s",

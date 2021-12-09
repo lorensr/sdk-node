@@ -104,6 +104,14 @@ function compareCompletion(
   req: coresdk.workflow_completion.WFActivationCompletion,
   expected: coresdk.workflow_completion.IWFActivationCompletion
 ) {
+  console.log('reqqqq:', req.successful?.commands?.[0]);
+  console.log(
+    'expected:',
+    new coresdk.workflow_completion.WFActivationCompletion({
+      ...expected,
+      runId: t.context.runId,
+    }).successful?.commands?.[0]
+  );
   t.deepEqual(
     req.toJSON(),
     new coresdk.workflow_completion.WFActivationCompletion({
@@ -321,7 +329,7 @@ test('successString', async (t) => {
   compareCompletion(
     t,
     req,
-    makeSuccess([makeCompleteWorkflowExecution(defaultDataConverter.toPayloadSync('success'))])
+    makeSuccess([makeCompleteWorkflowExecution(await defaultDataConverter.toPayload('success'))])
   );
 });
 
@@ -333,6 +341,7 @@ function cleanStackTrace(stack: string) {
 }
 
 function cleanWorkflowFailureStackTrace(req: coresdk.workflow_completion.WFActivationCompletion, commandIndex = 0) {
+  console.log('req:', req.successful?.commands?.[0]);
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   req.successful!.commands![commandIndex].failWorkflowExecution!.failure!.stackTrace = cleanStackTrace(
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -356,6 +365,7 @@ function cleanWorkflowQueryFailureStackTrace(
 test('throwAsync', async (t) => {
   const { workflowType } = t.context;
   const req = cleanWorkflowFailureStackTrace(await activate(t, makeStartWorkflow(workflowType)));
+
   compareCompletion(
     t,
     req,
@@ -381,7 +391,11 @@ test('date', async (t) => {
 test('asyncWorkflow', async (t) => {
   const { workflowType } = t.context;
   const req = await activate(t, makeStartWorkflow(workflowType));
-  compareCompletion(t, req, makeSuccess([makeCompleteWorkflowExecution(defaultDataConverter.toPayloadSync('async'))]));
+  compareCompletion(
+    t,
+    req,
+    makeSuccess([makeCompleteWorkflowExecution(await defaultDataConverter.toPayload('async'))])
+  );
 });
 
 test('deferredResolve', async (t) => {
@@ -407,7 +421,7 @@ test('sleeper', async (t) => {
 test('with ms string - sleeper', async (t) => {
   const { logs, workflowType } = t.context;
   {
-    const req = await activate(t, makeStartWorkflow(workflowType, [defaultDataConverter.toPayloadSync('10s')]));
+    const req = await activate(t, makeStartWorkflow(workflowType, [await defaultDataConverter.toPayload('10s')]));
     compareCompletion(t, req, makeSuccess([makeStartTimerCommand({ seq: 1, startToFireTimeout: msToTs('10s') })]));
   }
   {
@@ -1440,7 +1454,7 @@ test('resolve activity with result - http', async (t) => {
     compareCompletion(
       t,
       completion,
-      makeSuccess([makeCompleteWorkflowExecution(defaultDataConverter.toPayloadSync(result))])
+      makeSuccess([makeCompleteWorkflowExecution(await defaultDataConverter.toPayload(result))])
     );
   }
 });

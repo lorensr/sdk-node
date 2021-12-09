@@ -1,18 +1,14 @@
 import {
   composeInterceptors,
-  errorToFailure,
   ensureTemporalFailure,
-  failureToError,
-  optionalFailureToOptionalError,
   IllegalStateError,
   WorkflowSignalType,
-  DataConverter,
-  defaultDataConverter,
-  arrayFromPayloadsSync,
   Workflow,
   WorkflowQueryType,
+  Headers,
+  checkExtends,
+  Deserialized,
 } from '@temporalio/common';
-import { checkExtends } from '@temporalio/common/lib/type-helpers';
 import type { coresdk } from '@temporalio/proto/lib/coresdk';
 import { alea, RNG } from './alea';
 import { ContinueAsNew, WorkflowInfo } from './interfaces';
@@ -79,7 +75,7 @@ export class Activator implements ActivationHandler {
     return await promise;
   }
 
-  public startWorkflow(activation: coresdk.workflow_activation.IStartWorkflow): void {
+  public startWorkflow(activation: Deserialized<coresdk.workflow_activation.IStartWorkflow>): void {
     const { info } = state;
     if (info === undefined) {
       throw new IllegalStateError('Workflow has not been initialized');
@@ -90,8 +86,8 @@ export class Activator implements ActivationHandler {
       this.startWorkflowNextHandler.bind(this)
     );
     execute({
-      headers: activation.headers ?? {},
-      args: arrayFromPayloadsSync(state.dataConverter, activation.arguments),
+      headers: (activation.headers as Headers) ?? {},
+      args: activation.arguments ?? [],
     })
       .then(completeWorkflow)
       .catch(handleWorkflowFailure);
@@ -114,16 +110,13 @@ export class Activator implements ActivationHandler {
     const { resolve, reject } = consumeCompletion('activity', getSeq(activation));
     if (activation.result.completed) {
       const completed = activation.result.completed;
-      const result = completed.result ? state.dataConverter.fromPayloadSync(completed.result) : undefined;
-      resolve(result);
+      resolve(completed.result);
     } else if (activation.result.failed) {
       const { failure } = activation.result.failed;
-      const err = await optionalFailureToOptionalError(failure, state.dataConverter);
-      reject(err);
+      reject(failure);
     } else if (activation.result.cancelled) {
       const { failure } = activation.result.cancelled;
-      const err = await optionalFailureToOptionalError(failure, state.dataConverter);
-      reject(err);
+      reject(failure);
     }
   }
 
@@ -154,7 +147,7 @@ export class Activator implements ActivationHandler {
       if (!activation.cancelled.failure) {
         throw new TypeError('Got no failure in cancelled variant');
       }
-      reject(await failureToError(activation.cancelled.failure, state.dataConverter));
+      reject(activation.cancelled.failure);
     } else {
       throw new TypeError('Got ResolveChildWorkflowExecutionStart with no status');
     }
@@ -169,20 +162,19 @@ export class Activator implements ActivationHandler {
     const { resolve, reject } = consumeCompletion('childWorkflowComplete', getSeq(activation));
     if (activation.result.completed) {
       const completed = activation.result.completed;
-      const result = completed.result ? await state.dataConverter.fromPayload(completed.result) : undefined;
-      resolve(result);
+      resolve(completed.result);
     } else if (activation.result.failed) {
       const { failure } = activation.result.failed;
       if (failure === undefined || failure === null) {
         throw new TypeError('Got failed result with no failure attribute');
       }
-      reject(await failureToError(failure, state.dataConverter));
+      reject(failure);
     } else if (activation.result.cancelled) {
       const { failure } = activation.result.cancelled;
       if (failure === undefined || failure === null) {
         throw new TypeError('Got cancelled result with no failure attribute');
       }
-      reject(await failureToError(failure, state.dataConverter));
+      reject(failure);
     }
   }
 
@@ -199,7 +191,7 @@ export class Activator implements ActivationHandler {
     return ret;
   }
 
-  public queryWorkflow(activation: coresdk.workflow_activation.IQueryWorkflow): void {
+  public queryWorkflow(activation: Deserialized<coresdk.workflow_activation.IQueryWorkflow>): void {
     if (!this.workflowFunctionWasCalled) {
       state.bufferedQueries.push(activation);
       return;
@@ -217,7 +209,7 @@ export class Activator implements ActivationHandler {
     );
     execute({
       queryName: queryType,
-      args: arrayFromPayloadsSync(state.dataConverter, activation.arguments),
+      args: activation.arguments ?? [],
       queryId,
     }).then(
       (result) => completeQuery(queryId, result),
@@ -233,7 +225,7 @@ export class Activator implements ActivationHandler {
     return fn(...args);
   }
 
-  public signalWorkflow(activation: coresdk.workflow_activation.ISignalWorkflow): void {
+  public signalWorkflow(activation: Deserialized<coresdk.workflow_activation.ISignalWorkflow>): void {
     const { signalName } = activation;
     if (!signalName) {
       throw new TypeError('Missing activation signalName');
@@ -256,7 +248,7 @@ export class Activator implements ActivationHandler {
       this.signalWorkflowNextHandler.bind(this)
     );
     execute({
-      args: arrayFromPayloadsSync(state.dataConverter, activation.input),
+      args: activation.input ?? [],
       signalName,
     }).catch(handleWorkflowFailure);
   }
@@ -266,7 +258,7 @@ export class Activator implements ActivationHandler {
   ): Promise<void> {
     const { resolve, reject } = consumeCompletion('signalWorkflow', getSeq(activation));
     if (activation.failure) {
-      reject(await failureToError(activation.failure, state.dataConverter));
+      reject(activation.failure);
     } else {
       resolve(undefined);
     }
@@ -277,7 +269,7 @@ export class Activator implements ActivationHandler {
   ): Promise<void> {
     const { resolve, reject } = consumeCompletion('cancelWorkflow', getSeq(activation));
     if (activation.failure) {
-      reject(await failureToError(activation.failure, state.dataConverter));
+      reject(activation.failure);
     } else {
       resolve(undefined);
     }
@@ -330,7 +322,7 @@ export class State {
   /**
    * Holds buffered signal calls until a handler is registered
    */
-  public readonly bufferedSignals = new Map<string, coresdk.workflow_activation.ISignalWorkflow[]>();
+  public readonly bufferedSignals = new Map<string, Deserialized<coresdk.workflow_activation.ISignalWorkflow>[]>();
 
   /**
    * Holds buffered query calls until a handler is registered.
@@ -339,7 +331,7 @@ export class State {
    * This is required because async interceptors might block workflow function invocation
    * which delays query handler registration.
    */
-  public readonly bufferedQueries = Array<coresdk.workflow_activation.IQueryWorkflow>();
+  public readonly bufferedQueries = Array<Deserialized<coresdk.workflow_activation.IQueryWorkflow>>();
 
   /**
    * Mapping of signal name to handler
@@ -358,7 +350,7 @@ export class State {
   /**
    * Buffer that stores all generated commands, reset after each activation
    */
-  public commands: coresdk.workflow_commands.IWorkflowCommand[] = [];
+  public commands: Deserialized<coresdk.workflow_commands.IWorkflowCommand>[] = [];
   /**
   /**
    * Stores all {@link condition}s that haven't been unblocked yet
@@ -432,8 +424,6 @@ export class State {
    */
   public importInterceptors?: InterceptorsImportFunc;
 
-  public dataConverter: DataConverter = defaultDataConverter;
-
   /**
    * Patches we know the status of for this workflow, as in {@link patched}
    */
@@ -457,7 +447,7 @@ export class State {
    *
    * Prevents commands from being added after Workflow completion.
    */
-  pushCommand(cmd: coresdk.workflow_commands.IWorkflowCommand, complete = false): void {
+  pushCommand(cmd: Deserialized<coresdk.workflow_commands.IWorkflowCommand>, complete = false): void {
     // Only query responses may be sent after completion
     if (this.completed && !cmd.respondToQuery) return;
     this.commands.push(cmd);
@@ -472,9 +462,7 @@ export const state = new State();
 function completeWorkflow(result: any) {
   state.pushCommand(
     {
-      completeWorkflowExecution: {
-        result: state.dataConverter.toPayloadSync(result),
-      },
+      completeWorkflowExecution: { result },
     },
     true
   );
@@ -493,7 +481,7 @@ export async function handleWorkflowFailure(error: unknown): Promise<void> {
     state.pushCommand(
       {
         failWorkflowExecution: {
-          failure: await errorToFailure(ensureTemporalFailure(error), state.dataConverter),
+          failure: ensureTemporalFailure(error),
         },
       },
       true
@@ -503,13 +491,13 @@ export async function handleWorkflowFailure(error: unknown): Promise<void> {
 
 function completeQuery(queryId: string, result: unknown) {
   state.pushCommand({
-    respondToQuery: { queryId, succeeded: { response: state.dataConverter.toPayloadSync(result) } },
+    respondToQuery: { queryId, succeeded: { response: result } },
   });
 }
 
 async function failQuery(queryId: string, error: any) {
   state.pushCommand({
-    respondToQuery: { queryId, failed: await errorToFailure(ensureTemporalFailure(error), state.dataConverter) },
+    respondToQuery: { queryId, failed: ensureTemporalFailure(error) },
   });
 }
 

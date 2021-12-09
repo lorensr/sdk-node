@@ -33,6 +33,23 @@ checkExtends<temporal.api.enums.v1.RetryState, RetryState>();
 
 export type WorkflowExecution = temporal.api.common.v1.IWorkflowExecution;
 
+enum FailureName {
+  TEMPORAL_FAILURE = 'TemporalFailure',
+  SERVER_FAILURE = 'ServerFailure',
+  APPLICATION_FAILURE = 'ApplicationFailure',
+  CANCELLED_FAILURE = 'CancelledFailure',
+  TERMINATED_FAILURE = 'TerminatedFailure',
+  TIMEOUT_FAILURE = 'TimeoutFailure',
+  ACTIVITY_FAILURE = 'ActivityFailure',
+  CHILD_WORKFLOW_FAILURE = 'ChildWorkflowFailure',
+}
+
+const isTemporalFailure = (err: unknown): boolean =>
+  !!err &&
+  typeof err === 'object' &&
+  'type' in err &&
+  Object.values(FailureName).includes((err as Record<string, FailureName>).type);
+
 /**
  * Represents failures that can cross Workflow and Activity boundaries.
  *
@@ -243,82 +260,100 @@ export function cutoffStackTrace(stack?: string): string {
 }
 
 /**
+ * The TemporalFailure class in the Worker is not the same object as the one in the Workflow, so instanceof doesn't
+ * work.
+ */ // eslint-disable-next-line @typescript-eslint/ban-types
+function workflowInclusiveInstanceOf(instance: unknown, type: Function): boolean {
+  let proto = Object.getPrototypeOf(instance);
+  while (proto) {
+    if (proto.constructor?.toString() === type.toString()) return true;
+    proto = Object.getPrototypeOf(proto);
+  }
+  return false;
+}
+
+/**
  * Converts a caught error to a Failure proto message
  */
 export async function errorToFailure(err: unknown, dataConverter: DataConverter): Promise<ProtoFailure> {
-  if (err instanceof TemporalFailure) {
-    if (err.failure) return err.failure;
+  if (workflowInclusiveInstanceOf(err, TemporalFailure)) {
+    const error = err as TemporalFailure;
+    if (error.failure) return error.failure;
 
     const base = {
-      message: err.message,
-      stackTrace: cutoffStackTrace(err.stack),
-      cause: await optionalErrorToOptionalFailure(err.cause, dataConverter),
+      message: error.message,
+      stackTrace: cutoffStackTrace(error.stack),
+      cause: await optionalErrorToOptionalFailure(error.cause, dataConverter),
       source: FAILURE_SOURCE,
     };
-    if (err instanceof ActivityFailure) {
+    if (workflowInclusiveInstanceOf(error, ActivityFailure)) {
+      const activityFailure = error as ActivityFailure;
       return {
         ...base,
         activityFailureInfo: {
-          ...err,
-          activityType: { name: err.activityType },
+          ...activityFailure,
+          activityType: { name: activityFailure.activityType },
         },
       };
     }
-    if (err instanceof ChildWorkflowFailure) {
+    if (workflowInclusiveInstanceOf(error, ChildWorkflowFailure)) {
+      const childWorkflowFailure = error as ChildWorkflowFailure;
       return {
         ...base,
         childWorkflowExecutionFailureInfo: {
-          ...err,
-          workflowExecution: err.execution,
-          workflowType: { name: err.workflowType },
+          ...childWorkflowFailure,
+          workflowExecution: childWorkflowFailure.execution,
+          workflowType: { name: childWorkflowFailure.workflowType },
         },
       };
     }
-    if (err instanceof ApplicationFailure) {
+    if (workflowInclusiveInstanceOf(error, ApplicationFailure)) {
+      const applicationFailure = error as ApplicationFailure;
       return {
         ...base,
         applicationFailureInfo: {
-          type: err.type,
-          nonRetryable: err.nonRetryable,
-          details:
-            err.details && err.details.length
-              ? { payloads: await dataConverter.toPayloads(...err.details) }
-              : undefined,
-        },
-      };
-    }
-    if (err instanceof CancelledFailure) {
-      return {
-        ...base,
-        canceledFailureInfo: {
-          details:
-            err.details && err.details.length
-              ? { payloads: await dataConverter.toPayloads(...err.details) }
-              : undefined,
-        },
-      };
-    }
-    if (err instanceof TimeoutFailure) {
-      return {
-        ...base,
-        timeoutFailureInfo: {
-          timeoutType: err.timeoutType,
-          lastHeartbeatDetails: err.lastHeartbeatDetails
-            ? { payloads: await dataConverter.toPayloads(err.lastHeartbeatDetails) }
+          type: applicationFailure.type,
+          nonRetryable: applicationFailure.nonRetryable,
+          details: applicationFailure.details?.length
+            ? { payloads: await dataConverter.toPayloads(...applicationFailure.details) }
             : undefined,
         },
       };
     }
-    if (err instanceof TerminatedFailure) {
+    if (workflowInclusiveInstanceOf(error, CancelledFailure)) {
+      const cancelledFailure = error as CancelledFailure;
+      return {
+        ...base,
+        canceledFailureInfo: {
+          details: cancelledFailure.details?.length
+            ? { payloads: await dataConverter.toPayloads(...cancelledFailure.details) }
+            : undefined,
+        },
+      };
+    }
+    if (workflowInclusiveInstanceOf(error, TimeoutFailure)) {
+      const timeoutFailure = error as TimeoutFailure;
+      return {
+        ...base,
+        timeoutFailureInfo: {
+          timeoutType: timeoutFailure.timeoutType,
+          lastHeartbeatDetails: timeoutFailure.lastHeartbeatDetails
+            ? { payloads: await dataConverter.toPayloads(timeoutFailure.lastHeartbeatDetails) }
+            : undefined,
+        },
+      };
+    }
+    if (workflowInclusiveInstanceOf(error, TerminatedFailure)) {
       return {
         ...base,
         terminatedFailureInfo: {},
       };
     }
-    if (err instanceof ServerFailure) {
+    if (workflowInclusiveInstanceOf(error, ServerFailure)) {
+      const serverFailure = error as ServerFailure;
       return {
         ...base,
-        serverFailureInfo: { nonRetryable: err.nonRetryable },
+        serverFailureInfo: { nonRetryable: serverFailure.nonRetryable },
       };
     }
     // Just a TemporalFailure
@@ -329,8 +364,9 @@ export async function errorToFailure(err: unknown, dataConverter: DataConverter)
     source: FAILURE_SOURCE,
   };
 
-  if (err instanceof Error) {
-    return { ...base, message: err.message ?? '', stackTrace: cutoffStackTrace(err.stack) };
+  if (workflowInclusiveInstanceOf(err, Error)) {
+    const error = err as Error;
+    return { ...base, message: error.message ?? '', stackTrace: cutoffStackTrace(error.stack) };
   }
 
   if (typeof err === 'string') {
@@ -348,11 +384,12 @@ export async function errorToFailure(err: unknown, dataConverter: DataConverter)
  * Otherwise returns an `ApplicationFailure` with `String(err)` as the message.
  */
 export function ensureTemporalFailure(err: unknown): TemporalFailure {
-  if (err instanceof TemporalFailure) {
-    return err;
-  } else if (err instanceof Error) {
-    const failure = new ApplicationFailure(err.message, err.name, false);
-    failure.stack = err.stack;
+  if (workflowInclusiveInstanceOf(err, TemporalFailure)) {
+    return err as TemporalFailure;
+  } else if (workflowInclusiveInstanceOf(err, Error)) {
+    const error = err as Error;
+    const failure = new ApplicationFailure(error.message, error.name, false);
+    failure.stack = error.stack;
     return failure;
   } else {
     const failure = new ApplicationFailure(String(err), undefined, false);
@@ -473,11 +510,12 @@ export async function failureToError(failure: ProtoFailure, dataConverter: DataC
  * Otherwise, return `err.message`.
  */
 export function rootCause(err: unknown): string | undefined {
-  if (err instanceof TemporalFailure) {
-    return err.cause ? rootCause(err.cause) : err.message;
+  if (workflowInclusiveInstanceOf(err, TemporalFailure)) {
+    const error = err as TemporalFailure;
+    return error.cause ? rootCause(error.cause) : error.message;
   }
-  if (err instanceof Error) {
-    return err.message;
+  if (workflowInclusiveInstanceOf(err, Error)) {
+    return (err as Error).message;
   }
   if (typeof err === 'string') {
     return err;

@@ -2,9 +2,10 @@ import vm from 'vm';
 import { coresdk } from '@temporalio/proto';
 import * as internals from '@temporalio/workflow/lib/worker-interface';
 import { WorkflowInfo } from '@temporalio/workflow';
-import { defaultDataConverter, errorToFailure, IllegalStateError } from '@temporalio/common';
+import { IllegalStateError, DataConverter, defaultDataConverter, errorToFailure } from '@temporalio/common';
 import { partition } from '../utils';
 import { Workflow, WorkflowCreator, WorkflowCreateOptions } from './interface';
+import { WorkflowSerializer } from './serializer';
 import { SinkCall } from '@temporalio/workflow/lib/sinks';
 import { AsyncLocalStorage } from 'async_hooks';
 
@@ -14,7 +15,11 @@ import { AsyncLocalStorage } from 'async_hooks';
 export class VMWorkflowCreator implements WorkflowCreator {
   script?: vm.Script;
 
-  constructor(script: vm.Script, public readonly isolateExecutionTimeoutMs: number) {
+  constructor(
+    script: vm.Script,
+    public readonly isolateExecutionTimeoutMs: number,
+    protected readonly dataConverter: DataConverter
+  ) {
     this.script = script;
   }
 
@@ -42,7 +47,7 @@ export class VMWorkflowCreator implements WorkflowCreator {
 
     await workflowModule.initRuntime(options);
 
-    return new VMWorkflow(options.info, context, workflowModule, isolateExecutionTimeoutMs);
+    return new VMWorkflow(options.info, context, workflowModule, isolateExecutionTimeoutMs, this.dataConverter);
   }
 
   protected async getContext(): Promise<vm.Context> {
@@ -77,10 +82,15 @@ export class VMWorkflowCreator implements WorkflowCreator {
   public static async create<T extends typeof VMWorkflowCreator>(
     this: T,
     code: string,
-    isolateExecutionTimeoutMs: number
+    isolateExecutionTimeoutMs: number,
+    dataConverterPath?: string
   ): Promise<InstanceType<T>> {
     const script = new vm.Script(code, { filename: 'workflow-isolate' });
-    return new this(script, isolateExecutionTimeoutMs) as InstanceType<T>;
+    let dataConverter = defaultDataConverter;
+    if (dataConverterPath) {
+      dataConverter = (await import(dataConverterPath)).dataConverter;
+    }
+    return new this(script, isolateExecutionTimeoutMs, dataConverter) as InstanceType<T>;
   }
 
   /**
@@ -98,13 +108,17 @@ type WorkflowModule = typeof internals;
  */
 export class VMWorkflow implements Workflow {
   unhandledRejection: unknown;
+  serializer: WorkflowSerializer;
 
   constructor(
     public readonly info: WorkflowInfo,
     protected context: vm.Context | undefined,
     readonly workflowModule: WorkflowModule,
-    public readonly isolateExecutionTimeoutMs: number
-  ) {}
+    public readonly isolateExecutionTimeoutMs: number,
+    protected readonly dataConverter: DataConverter
+  ) {
+    this.serializer = new WorkflowSerializer(dataConverter);
+  }
 
   /**
    * Send request to the Workflow runtime's worker-interface
@@ -157,8 +171,10 @@ export class VMWorkflow implements Workflow {
       if (jobs.length === 0) {
         continue;
       }
+      const activationMessage = coresdk.workflow_activation.WFActivation.fromObject({ ...activation, jobs });
+      // console.log('activationMessage:', activationMessage.jobs[0].startWorkflow?.arguments?.[0]);
       const { numBlockedConditions } = await this.workflowModule.activate(
-        coresdk.workflow_activation.WFActivation.fromObject({ ...activation, jobs }),
+        await this.serializer.deserializeActivation(activationMessage),
         batchIndex++
       );
       if (numBlockedConditions > 0) {
@@ -174,10 +190,12 @@ export class VMWorkflow implements Workflow {
     if (this.unhandledRejection) {
       return coresdk.workflow_completion.WFActivationCompletion.encodeDelimited({
         runId: activation.runId,
-        failed: { failure: await errorToFailure(this.unhandledRejection, defaultDataConverter) },
+        failed: { failure: await errorToFailure(this.unhandledRejection, this.dataConverter) },
       }).finish();
     }
-    return coresdk.workflow_completion.WFActivationCompletion.encodeDelimited(completion).finish();
+    const serializedCompletion = await this.serializer.serializeCompletion(completion);
+    // console.log('serializedCompletion:', serializedCompletion.successful?.commands?.[0]);
+    return coresdk.workflow_completion.WFActivationCompletion.encodeDelimited(serializedCompletion).finish();
   }
 
   /**

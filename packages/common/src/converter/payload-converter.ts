@@ -39,55 +39,15 @@ export interface PayloadConverter {
    *     reason.
    */
   fromData<T>(content: Payload): Promise<T>;
-
-  /**
-   * Synchronous version of {@link toData}, used in the Workflow runtime because
-   * the async version limits the functionality of the runtime.
-   *
-   * Implements conversion of value to payload
-   *
-   * @param value JS value to convert.
-   * @return converted value or `undefined` if unable to convert.
-   * @throws DataConverterException if conversion of the value passed as parameter failed for any
-   *     reason.
-   */
-  toDataSync(value: unknown): Payload | undefined;
-
-  /**
-   * Synchronous version of {@link fromData}, used in the Workflow runtime because
-   * the async version limits the functionality of the runtime.
-   *
-   * Implements conversion of payload to value.
-   *
-   * @param content Serialized value to convert to a JS value.
-   * @return converted JS value
-   * @throws DataConverterException if conversion of the data passed as parameter failed for any
-   *     reason.
-   */
-  fromDataSync<T>(content: Payload): T;
-}
-
-export abstract class AsyncFacadePayloadConverter implements PayloadConverter {
-  abstract encodingType: string;
-  abstract toDataSync(value: unknown): Payload | undefined;
-  abstract fromDataSync<T>(content: Payload): T;
-
-  public async toData(value: unknown): Promise<Payload | undefined> {
-    return this.toDataSync(value);
-  }
-
-  public async fromData<T>(content: Payload): Promise<T> {
-    return this.fromDataSync(content);
-  }
 }
 
 /**
  * Converts between JS undefined and NULL Payload
  */
-export class UndefinedPayloadConverter extends AsyncFacadePayloadConverter {
+export class UndefinedPayloadConverter implements PayloadConverter {
   public encodingType = encodingTypes.METADATA_ENCODING_NULL;
 
-  public toDataSync(value: unknown): Payload | undefined {
+  public async toData(value: unknown): Promise<Payload | undefined> {
     if (value !== undefined) return undefined; // Can't encode
     return {
       metadata: {
@@ -96,7 +56,7 @@ export class UndefinedPayloadConverter extends AsyncFacadePayloadConverter {
     };
   }
 
-  public fromDataSync<T>(_content: Payload): T {
+  public async fromData<T>(_content: Payload): Promise<T> {
     return undefined as any; // Just return undefined
   }
 }
@@ -104,10 +64,10 @@ export class UndefinedPayloadConverter extends AsyncFacadePayloadConverter {
 /**
  * Converts between non-undefined values and serialized JSON Payload
  */
-export class JsonPayloadConverter extends AsyncFacadePayloadConverter {
+export class JsonPayloadConverter implements PayloadConverter {
   public encodingType = encodingTypes.METADATA_ENCODING_JSON;
 
-  public toDataSync(value: unknown): Payload | undefined {
+  public async toData(value: unknown): Promise<Payload | undefined> {
     if (value === undefined) return undefined; // Should be encoded with the UndefinedPayloadConverter
     return {
       metadata: {
@@ -117,7 +77,7 @@ export class JsonPayloadConverter extends AsyncFacadePayloadConverter {
     };
   }
 
-  public fromDataSync<T>(content: Payload): T {
+  public async fromData<T>(content: Payload): Promise<T> {
     if (content.data === undefined || content.data === null) {
       throw new ValueError('Got payload with no data');
     }
@@ -128,10 +88,10 @@ export class JsonPayloadConverter extends AsyncFacadePayloadConverter {
 /**
  * Converts between binary data types and RAW Payload
  */
-export class BinaryPayloadConverter extends AsyncFacadePayloadConverter {
+export class BinaryPayloadConverter implements PayloadConverter {
   public encodingType = encodingTypes.METADATA_ENCODING_RAW;
 
-  public toDataSync(value: unknown): Payload | undefined {
+  public async toData(value: unknown): Promise<Payload | undefined> {
     // TODO: support any DataView or ArrayBuffer?
     if (!(value instanceof Uint8Array)) {
       return undefined;
@@ -144,7 +104,7 @@ export class BinaryPayloadConverter extends AsyncFacadePayloadConverter {
     };
   }
 
-  public fromDataSync<T>(content: Payload): T {
+  public async fromData<T>(content: Payload): Promise<T> {
     // TODO: support any DataView or ArrayBuffer?
     return content.data as any;
   }
@@ -153,26 +113,24 @@ export class BinaryPayloadConverter extends AsyncFacadePayloadConverter {
 /**
  * Converts between protobufjs Message instances and serialized Protobuf Payload
  */
-export class ProtobufPayloadConverter extends AsyncFacadePayloadConverter {
+export class ProtobufPayloadConverter implements PayloadConverter {
   public encodingType = encodingTypes.METADATA_ENCODING_PROTOBUF;
 
   // eslint-disable-next-line @typescript-eslint/ban-types
   constructor(protected protobufClasses?: Record<string, unknown>) {
-    super();
-
     if (protobufClasses && typeof protobufClasses !== 'object') {
       throw new DataConverterError('protobufClasses must be an object');
     }
   }
 
-  public toDataSync(value: unknown): Payload | undefined {
+  public async toData(value: unknown): Promise<Payload | undefined> {
     const isProtobufMessageInstance =
       this.protobufClasses && value && typeof value === 'object' && this.protobufClasses[value.constructor.name];
-    if (!isProtobufMessageInstance) {
+    if (!isProtobufMessageInstance || !this.protobufClasses) {
       return undefined;
     }
 
-    const messageClass = this.validateMessageClass(this.protobufClasses![value.constructor.name]);
+    const messageClass = this.validateMessageClass(this.protobufClasses[value.constructor.name]);
 
     return {
       metadata: {
@@ -183,7 +141,7 @@ export class ProtobufPayloadConverter extends AsyncFacadePayloadConverter {
     };
   }
 
-  public fromDataSync<T>(content: Payload): T {
+  public async fromData<T>(content: Payload): Promise<T> {
     if (content.data === undefined || content.data === null) {
       throw new ValueError('Got payload with no data');
     }

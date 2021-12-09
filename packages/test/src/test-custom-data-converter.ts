@@ -8,7 +8,7 @@ import { protobufWorkflow } from './workflows';
 import { dataConverter, messageInstance } from './data-converter';
 
 if (RUN_INTEGRATION_TESTS) {
-  test('Client and Worker work with provided dataConverter/dataConverterPath', async (t) => {
+  test.skip('Client and Worker work with provided dataConverter/dataConverterPath', async (t) => {
     const taskQueue = 'custom-data-converter';
     const worker = await Worker.create({
       ...defaultOptions,

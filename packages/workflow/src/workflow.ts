@@ -7,7 +7,6 @@ import {
   msOptionalToTs,
   Workflow,
   composeInterceptors,
-  mapToPayloadsSync,
   WorkflowResultType,
   SignalDefinition,
   QueryDefinition,
@@ -158,7 +157,7 @@ async function scheduleActivityNextHandler({
         seq,
         activityId: options.activityId ?? `${seq}`,
         activityType,
-        arguments: state.dataConverter.toPayloadsSync(...args),
+        arguments: args,
         retryPolicy: options.retry ? compileRetryPolicy(options.retry) : undefined,
         taskQueue: options.taskQueue || state.info?.taskQueue,
         heartbeatTimeout: msOptionalToTs(options.heartbeatTimeout),
@@ -238,7 +237,7 @@ async function startChildWorkflowExecutionNextHandler({
         seq,
         workflowId,
         workflowType,
-        input: state.dataConverter.toPayloadsSync(...options.args),
+        input: options.args,
         retryPolicy: options.retry ? compileRetryPolicy(options.retry) : undefined,
         taskQueue: options.taskQueue || state.info?.taskQueue,
         workflowExecutionTimeout: msOptionalToTs(options.workflowExecutionTimeout),
@@ -250,10 +249,8 @@ async function startChildWorkflowExecutionNextHandler({
         workflowIdReusePolicy: options.workflowIdReusePolicy,
         parentClosePolicy: options.parentClosePolicy,
         cronSchedule: options.cronSchedule,
-        searchAttributes: options.searchAttributes
-          ? mapToPayloadsSync(state.dataConverter, options.searchAttributes)
-          : undefined,
-        memo: options.memo && mapToPayloadsSync(state.dataConverter, options.memo),
+        searchAttributes: options.searchAttributes,
+        memo: options.memo,
       },
     });
   });
@@ -295,7 +292,7 @@ function signalWorkflowNextHandler({ seq, signalName, args, target }: SignalWork
     state.pushCommand({
       signalExternalWorkflowExecution: {
         seq,
-        args: state.dataConverter.toPayloadsSync(...args),
+        args,
         signalName,
         ...(target.type === 'external'
           ? {
@@ -692,7 +689,7 @@ export function makeContinueAsNewFunc<F extends Workflow>(
       const { headers, args, options } = input;
       throw new ContinueAsNew({
         workflowType: options.workflowType,
-        arguments: await state.dataConverter.toPayloads(...args),
+        arguments: args,
         header: headers,
         taskQueue: options.taskQueue,
         memo: options.memo,

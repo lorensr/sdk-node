@@ -708,7 +708,7 @@ export class Worker {
       externalCalls.map(async ({ ifaceName, fnName, args }) => {
         const dep = sinks?.[ifaceName]?.[fnName];
         if (dep === undefined) {
-          this.log.error('Workflow referenced an unregistrered external sink', {
+          this.log.error('Workflow referenced an unregistered external sink', {
             ifaceName,
             fnName,
           });
@@ -870,7 +870,7 @@ export class Worker {
 
   protected activity$(): Observable<void> {
     // Note that we poll on activities even if there are no activities registered.
-    // This is so workflows invoking activities on this task queue get a non-retriable error.
+    // This is so workflows invoking activities on this task queue get a non-retryable error.
     return this.activityPoll$().pipe(
       this.activityOperator(),
       mergeMap(async ({ completion, parentSpan }) => {
@@ -914,7 +914,7 @@ export class Worker {
    */
   async run(): Promise<void> {
     if (this.state !== 'INITIALIZED') {
-      throw new IllegalStateError('Poller was aleady started');
+      throw new IllegalStateError('Poller was already started');
     }
     this.state = 'RUNNING';
 

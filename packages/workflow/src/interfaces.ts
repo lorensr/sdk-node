@@ -1,6 +1,5 @@
 import type { coresdk } from '@temporalio/proto/lib/coresdk';
-import { CommonWorkflowOptions } from '@temporalio/common';
-import { checkExtends } from '@temporalio/common/lib/type-helpers';
+import { CommonWorkflowOptions, checkExtends, Deserialized } from '@temporalio/common';
 
 /**
  * Workflow execution information
@@ -43,7 +42,7 @@ export interface WorkflowInfo {
 export class ContinueAsNew extends Error {
   public readonly type = 'ContinueAsNew';
 
-  constructor(public readonly command: coresdk.workflow_commands.IContinueAsNewWorkflowExecution) {
+  constructor(public readonly command: Deserialized<coresdk.workflow_commands.IContinueAsNewWorkflowExecution>) {
     super();
   }
 }

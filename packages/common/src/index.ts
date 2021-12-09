@@ -15,3 +15,5 @@ export * from './tls-config';
 export * from './workflow-handle';
 export * from './workflow-options';
 export * from './utils';
+export * from './types';
+export * from './type-helpers';

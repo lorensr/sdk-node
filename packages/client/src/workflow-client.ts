@@ -8,7 +8,7 @@ import {
   DataConverter,
   defaultDataConverter,
   composeInterceptors,
-  optionalFailureToOptionalError,
+  optionalProtoFailureToOptionalError,
   Workflow,
   BaseWorkflowHandle,
   QueryDefinition,
@@ -380,7 +380,7 @@ export class WorkflowClient {
         const { failure } = ev.workflowExecutionFailedEventAttributes;
         throw new WorkflowFailedError(
           'Workflow execution failed',
-          await optionalFailureToOptionalError(failure, this.options.dataConverter),
+          await optionalProtoFailureToOptionalError(failure, this.options.dataConverter),
           RetryState.RETRY_STATE_NON_RETRYABLE_FAILURE
         );
       } else if (ev.workflowExecutionCanceledEventAttributes) {

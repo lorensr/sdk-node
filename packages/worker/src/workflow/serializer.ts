@@ -1,7 +1,7 @@
 import { coresdk, temporal } from '@temporalio/proto';
 import {
   DataConverter,
-  optionalFailureToOptionalError,
+  deserializeFailure,
   Payload,
   Deserialized,
   errorToFailure,
@@ -77,8 +77,9 @@ export class WorkflowIOSerializer {
       string,
       temporal.api.failure.v1.IFailure | undefined | null
     >;
+    if (!accessibleFailureParent.failure) return;
 
-    accessibleFailureParent['failure'] = await optionalFailureToOptionalError(
+    accessibleFailureParent['failure'] = await deserializeFailure(
       accessibleFailureParent['failure'],
       this.dataConverter
     );

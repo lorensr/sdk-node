@@ -5,7 +5,7 @@ import { WorkflowInfo } from '@temporalio/workflow';
 import { IllegalStateError, DataConverter, defaultDataConverter, errorToFailure } from '@temporalio/common';
 import { partition } from '../utils';
 import { Workflow, WorkflowCreator, WorkflowCreateOptions } from './interface';
-import { WorkflowSerializer } from './serializer';
+import { WorkflowIOSerializer } from './serializer';
 import { SinkCall } from '@temporalio/workflow/lib/sinks';
 import { AsyncLocalStorage } from 'async_hooks';
 
@@ -108,7 +108,7 @@ type WorkflowModule = typeof internals;
  */
 export class VMWorkflow implements Workflow {
   unhandledRejection: unknown;
-  serializer: WorkflowSerializer;
+  serializer: WorkflowIOSerializer;
 
   constructor(
     public readonly info: WorkflowInfo,
@@ -117,7 +117,7 @@ export class VMWorkflow implements Workflow {
     public readonly isolateExecutionTimeoutMs: number,
     protected readonly dataConverter: DataConverter
   ) {
-    this.serializer = new WorkflowSerializer(dataConverter);
+    this.serializer = new WorkflowIOSerializer(dataConverter);
   }
 
   /**

@@ -1,9 +1,11 @@
 import type { temporal } from '@temporalio/proto/lib/coresdk';
-import { DataConverter, arrayFromPayloads } from './converter/data-converter';
-import { checkExtends } from './type-helpers';
+import { DataConverter } from './converter/data-converter';
+import { checkExtends, Deserialized } from './type-helpers';
 
 export const FAILURE_SOURCE = 'TypeScriptSDK';
 export type ProtoFailure = temporal.api.failure.v1.IFailure;
+export type DeserializedFailure = Deserialized<ProtoFailure>;
+
 // Avoid importing the proto implementation to reduce workflow bundle size
 // Copied from temporal.api.enums.v1.TimeoutType
 export enum TimeoutType {
@@ -33,23 +35,6 @@ checkExtends<temporal.api.enums.v1.RetryState, RetryState>();
 
 export type WorkflowExecution = temporal.api.common.v1.IWorkflowExecution;
 
-enum FailureName {
-  TEMPORAL_FAILURE = 'TemporalFailure',
-  SERVER_FAILURE = 'ServerFailure',
-  APPLICATION_FAILURE = 'ApplicationFailure',
-  CANCELLED_FAILURE = 'CancelledFailure',
-  TERMINATED_FAILURE = 'TerminatedFailure',
-  TIMEOUT_FAILURE = 'TimeoutFailure',
-  ACTIVITY_FAILURE = 'ActivityFailure',
-  CHILD_WORKFLOW_FAILURE = 'ChildWorkflowFailure',
-}
-
-const isTemporalFailure = (err: unknown): boolean =>
-  !!err &&
-  typeof err === 'object' &&
-  'type' in err &&
-  Object.values(FailureName).includes((err as Record<string, FailureName>).type);
-
 /**
  * Represents failures that can cross Workflow and Activity boundaries.
  *
@@ -69,7 +54,7 @@ export class TemporalFailure extends Error {
    *
    * Only present if this error was generated from an external operation.
    */
-  public failure?: ProtoFailure;
+  public failure?: DeserializedFailure;
 
   constructor(message: string | undefined, public readonly cause?: Error) {
     super(message ?? undefined);
@@ -115,7 +100,7 @@ export class ApplicationFailure extends TemporalFailure {
     message: string | undefined,
     public readonly type: string | undefined | null,
     public readonly nonRetryable: boolean,
-    public readonly details?: unknown[],
+    public readonly details?: unknown[] | null,
     cause?: Error
   ) {
     super(message, cause);
@@ -157,7 +142,7 @@ export class ApplicationFailure extends TemporalFailure {
 export class CancelledFailure extends TemporalFailure {
   public readonly name: string = 'CancelledFailure';
 
-  constructor(message: string | undefined, public readonly details: unknown[] = [], cause?: Error) {
+  constructor(message: string | undefined, public readonly details: unknown[] | null = [], cause?: Error) {
     super(message, cause);
   }
 }
@@ -401,11 +386,28 @@ export function ensureTemporalFailure(err: unknown): TemporalFailure {
 /**
  * Converts a Failure proto message to a JS Error object if defined or returns undefined.
  */
-export async function optionalFailureToOptionalError(
+export async function optionalProtoFailureToOptionalError(
   failure: ProtoFailure | undefined | null,
   dataConverter: DataConverter
 ): Promise<TemporalFailure | undefined> {
-  return failure ? await failureToError(failure, dataConverter) : undefined;
+  return failure ? failureToError(await deserializeFailure(failure, dataConverter)) : undefined;
+}
+
+export async function deserializeFailure(
+  failure: ProtoFailure,
+  dataConverter: DataConverter
+): Promise<DeserializedFailure> {
+  const deserializedFailure = failure as DeserializedFailure;
+  deserializedFailure.serializedFailure = failure;
+}
+
+/**
+ * Converts a deserialized Failure proto message to a JS Error object if defined or returns undefined.
+ */
+export function optionalFailureToOptionalError(
+  failure: DeserializedFailure | undefined | null
+): TemporalFailure | undefined {
+  return failure ? failureToError(failure) : undefined;
 }
 
 /**
@@ -413,44 +415,38 @@ export async function optionalFailureToOptionalError(
  *
  * Does not set common properties, that is done in {@link failureToError}.
  */
-export async function failureToErrorInner(
-  failure: ProtoFailure,
-  dataConverter: DataConverter
-): Promise<TemporalFailure> {
+export function failureToErrorInner(failure: DeserializedFailure): TemporalFailure {
   if (failure.applicationFailureInfo) {
     return new ApplicationFailure(
       failure.message ?? undefined,
       failure.applicationFailureInfo.type,
       Boolean(failure.applicationFailureInfo.nonRetryable),
-      await arrayFromPayloads(dataConverter, failure.applicationFailureInfo.details?.payloads),
-      await optionalFailureToOptionalError(failure.cause, dataConverter)
+      failure.applicationFailureInfo.details?.payloads,
+      optionalFailureToOptionalError(failure.cause)
     );
   }
   if (failure.serverFailureInfo) {
     return new ServerFailure(
       failure.message ?? undefined,
       Boolean(failure.serverFailureInfo.nonRetryable),
-      await optionalFailureToOptionalError(failure.cause, dataConverter)
+      optionalFailureToOptionalError(failure.cause)
     );
   }
   if (failure.timeoutFailureInfo) {
     return new TimeoutFailure(
       failure.message ?? undefined,
-      await dataConverter.fromPayloads(0, failure.timeoutFailureInfo.lastHeartbeatDetails?.payloads),
+      failure.timeoutFailureInfo.lastHeartbeatDetails?.payloads,
       failure.timeoutFailureInfo.timeoutType ?? TimeoutType.TIMEOUT_TYPE_UNSPECIFIED
     );
   }
   if (failure.terminatedFailureInfo) {
-    return new TerminatedFailure(
-      failure.message ?? undefined,
-      await optionalFailureToOptionalError(failure.cause, dataConverter)
-    );
+    return new TerminatedFailure(failure.message ?? undefined, optionalFailureToOptionalError(failure.cause));
   }
   if (failure.canceledFailureInfo) {
     return new CancelledFailure(
       failure.message ?? undefined,
-      await arrayFromPayloads(dataConverter, failure.canceledFailureInfo.details?.payloads),
-      await optionalFailureToOptionalError(failure.cause, dataConverter)
+      failure.canceledFailureInfo.details?.payloads,
+      optionalFailureToOptionalError(failure.cause)
     );
   }
   if (failure.resetWorkflowFailureInfo) {
@@ -458,8 +454,8 @@ export async function failureToErrorInner(
       failure.message ?? undefined,
       'ResetWorkflow',
       false,
-      await arrayFromPayloads(dataConverter, failure.resetWorkflowFailureInfo.lastHeartbeatDetails?.payloads),
-      await optionalFailureToOptionalError(failure.cause, dataConverter)
+      failure.resetWorkflowFailureInfo.lastHeartbeatDetails?.payloads,
+      optionalFailureToOptionalError(failure.cause)
     );
   }
   if (failure.childWorkflowExecutionFailureInfo) {
@@ -472,7 +468,7 @@ export async function failureToErrorInner(
       workflowExecution,
       workflowType.name,
       retryState ?? RetryState.RETRY_STATE_UNSPECIFIED,
-      await optionalFailureToOptionalError(failure.cause, dataConverter)
+      optionalFailureToOptionalError(failure.cause)
     );
   }
   if (failure.activityFailureInfo) {
@@ -484,20 +480,17 @@ export async function failureToErrorInner(
       failure.activityFailureInfo.activityId ?? undefined,
       failure.activityFailureInfo.retryState ?? RetryState.RETRY_STATE_UNSPECIFIED,
       failure.activityFailureInfo.identity ?? undefined,
-      await optionalFailureToOptionalError(failure.cause, dataConverter)
+      optionalFailureToOptionalError(failure.cause)
     );
   }
-  return new TemporalFailure(
-    failure.message ?? undefined,
-    await optionalFailureToOptionalError(failure.cause, dataConverter)
-  );
+  return new TemporalFailure(failure.message ?? undefined, optionalFailureToOptionalError(failure.cause));
 }
 
 /**
  * Converts a Failure proto message to a JS Error object.
  */
-export async function failureToError(failure: ProtoFailure, dataConverter: DataConverter): Promise<TemporalFailure> {
-  const err = await failureToErrorInner(failure, dataConverter);
+export function failureToError(failure: DeserializedFailure): TemporalFailure {
+  const err = failureToErrorInner(failure);
   err.stack = failure.stackTrace ?? '';
   err.failure = failure;
   return err;

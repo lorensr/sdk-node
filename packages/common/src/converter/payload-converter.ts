@@ -116,7 +116,6 @@ export class BinaryPayloadConverter implements PayloadConverter {
 export class ProtobufPayloadConverter implements PayloadConverter {
   public encodingType = encodingTypes.METADATA_ENCODING_PROTOBUF;
 
-  // eslint-disable-next-line @typescript-eslint/ban-types
   constructor(protected protobufClasses?: Record<string, unknown>) {
     if (protobufClasses && typeof protobufClasses !== 'object') {
       throw new DataConverterError('protobufClasses must be an object');
@@ -131,7 +130,6 @@ export class ProtobufPayloadConverter implements PayloadConverter {
     }
 
     const messageClass = this.validateMessageClass(this.protobufClasses[value.constructor.name]);
-
     return {
       metadata: {
         [METADATA_ENCODING_KEY]: encodingKeys.METADATA_ENCODING_PROTOBUF,

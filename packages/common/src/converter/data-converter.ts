@@ -41,6 +41,11 @@ export interface DataConverter {
   fromPayloads<T>(index: number, content?: Payload[] | null): Promise<T>;
 }
 
+export const isValidDataConverter = (dataConverter: unknown): boolean =>
+  typeof dataConverter === 'object' &&
+  dataConverter !== null &&
+  ['toPayload', 'toPayloads', 'fromPayload', 'fromPayloads'].every((method) => method in dataConverter);
+
 export class CompositeDataConverter implements DataConverter {
   readonly converters: PayloadConverter[];
   readonly converterByEncoding: Map<string, PayloadConverter> = new Map();

@@ -73,14 +73,11 @@ export class WorkflowIOSerializer {
 
   protected async deserializeFailure(failureParent: unknown): Promise<void> {
     if (!failureParent) return;
-    const accessibleFailureParent = failureParent as Record<
-      string,
-      temporal.api.failure.v1.IFailure | undefined | null
-    >;
+    const accessibleFailureParent = failureParent as Record<string, unknown>;
     if (!accessibleFailureParent.failure) return;
 
     accessibleFailureParent['failure'] = await deserializeFailure(
-      accessibleFailureParent['failure'],
+      accessibleFailureParent['failure'] as temporal.api.failure.v1.IFailure,
       this.dataConverter
     );
   }

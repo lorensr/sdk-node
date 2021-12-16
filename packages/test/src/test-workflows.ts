@@ -107,10 +107,11 @@ function compareCompletion(
   console.log('reqqqq:', req.successful?.commands?.[0]);
   console.log(
     'expected:',
-    new coresdk.workflow_completion.WFActivationCompletion({
-      ...expected,
-      runId: t.context.runId,
-    }).successful?.commands?.[0]
+    expected
+    // new coresdk.workflow_completion.WFActivationCompletion({
+    //   ...expected,
+    //   runId: t.context.runId,
+    // }).successful?.commands?.[0]
   );
   t.deepEqual(
     req.toJSON(),
@@ -341,7 +342,7 @@ function cleanStackTrace(stack: string) {
 }
 
 function cleanWorkflowFailureStackTrace(req: coresdk.workflow_completion.WFActivationCompletion, commandIndex = 0) {
-  console.log('req:', req.successful?.commands?.[0]);
+  console.log('req:', req.successful?.commands);
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   req.successful!.commands![commandIndex].failWorkflowExecution!.failure!.stackTrace = cleanStackTrace(
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -1660,7 +1661,7 @@ test('patchedTopLevel', async (t) => {
   t.deepEqual(logs, [[['Patches cannot be used before Workflow starts']]]);
 });
 
-test('tryToContinueAfterCompletion', async (t) => {
+test.only('tryToContinueAfterCompletion', async (t) => {
   const { workflowType } = t.context;
   {
     const completion = cleanWorkflowFailureStackTrace(await activate(t, makeStartWorkflow(workflowType)));

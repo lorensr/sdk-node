@@ -1,5 +1,6 @@
-import type { temporal } from '@temporalio/proto/lib/coresdk';
-import { DataConverter } from './converter/data-converter';
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
+import type { coresdk, temporal } from '@temporalio/proto/lib/coresdk';
+import { DataConverter, arrayFromPayloads } from './converter/data-converter';
 import { checkExtends, Deserialized } from './type-helpers';
 
 export const FAILURE_SOURCE = 'TypeScriptSDK';
@@ -245,12 +246,14 @@ export function cutoffStackTrace(stack?: string): string {
 }
 
 /**
- * The TemporalFailure class in the Worker is not the same object as the one in the Workflow, so instanceof doesn't
- * work.
+ * Error classes like Error and TemporalFailure in the Worker are not the same Function objects as those in the
+ * Workflow, so `instanceof` doesn't work across the vm. When serializing error objects that were created in the
+ * Workflow, we check their types with this function.
  */ // eslint-disable-next-line @typescript-eslint/ban-types
 function workflowInclusiveInstanceOf(instance: unknown, type: Function): boolean {
   let proto = Object.getPrototypeOf(instance);
   while (proto) {
+    // type.toString() returns the entire class definition
     if (proto.constructor?.toString() === type.toString()) return true;
     proto = Object.getPrototypeOf(proto);
   }
@@ -263,7 +266,8 @@ function workflowInclusiveInstanceOf(instance: unknown, type: Function): boolean
 export async function errorToFailure(err: unknown, dataConverter: DataConverter): Promise<ProtoFailure> {
   if (workflowInclusiveInstanceOf(err, TemporalFailure)) {
     const error = err as TemporalFailure;
-    if (error.failure) return error.failure;
+    // TODO okay?
+    if (error.failure) return error.failure as ProtoFailure;
 
     const base = {
       message: error.message,
@@ -398,7 +402,81 @@ export async function deserializeFailure(
   dataConverter: DataConverter
 ): Promise<DeserializedFailure> {
   const deserializedFailure = failure as DeserializedFailure;
-  deserializedFailure.serializedFailure = failure;
+  if (failure.cause) {
+    await deserializeFailure(failure.cause, dataConverter);
+  }
+
+  if (failure.applicationFailureInfo?.details) {
+    deserializedFailure.applicationFailureInfo!.details!.payloads = await arrayFromPayloads(
+      dataConverter,
+      failure.applicationFailureInfo.details.payloads
+    );
+  }
+  if (failure.timeoutFailureInfo?.lastHeartbeatDetails?.payloads) {
+    deserializedFailure.timeoutFailureInfo!.lastHeartbeatDetails!.payloads = await dataConverter.fromPayloads(
+      0,
+      failure.timeoutFailureInfo.lastHeartbeatDetails?.payloads
+    );
+  }
+  if (failure.canceledFailureInfo?.details?.payloads) {
+    deserializedFailure.canceledFailureInfo!.details!.payloads = await arrayFromPayloads(
+      dataConverter,
+      failure.canceledFailureInfo.details.payloads
+    );
+  }
+  if (failure.resetWorkflowFailureInfo?.lastHeartbeatDetails?.payloads) {
+    deserializedFailure.resetWorkflowFailureInfo!.lastHeartbeatDetails!.payloads = await arrayFromPayloads(
+      dataConverter,
+      failure.resetWorkflowFailureInfo.lastHeartbeatDetails.payloads
+    );
+  }
+  return deserializedFailure;
+}
+
+export async function serializeFailure(
+  failure: DeserializedFailure,
+  dataConverter: DataConverter
+): Promise<ProtoFailure> {
+  //TODO test
+  return failure as ProtoFailure;
+}
+
+export function convertFailuresToErrors(activation: Deserialized<coresdk.workflow_activation.WFActivation>): void {
+  activation.jobs.forEach((job) => {
+    if (job.resolveActivity?.result?.failed) {
+      job.resolveActivity.result.failed.failure = optionalFailureToOptionalError(
+        job.resolveActivity.result.failed.failure
+      );
+    }
+    if (job.resolveActivity?.result?.cancelled) {
+      job.resolveActivity.result.cancelled.failure = optionalFailureToOptionalError(
+        job.resolveActivity.result.cancelled.failure
+      );
+    }
+    if (job.resolveChildWorkflowExecutionStart?.cancelled) {
+      job.resolveChildWorkflowExecutionStart.cancelled.failure = optionalFailureToOptionalError(
+        job.resolveChildWorkflowExecutionStart.cancelled.failure
+      );
+    }
+    if (job.resolveSignalExternalWorkflow) {
+      job.resolveSignalExternalWorkflow = optionalFailureToOptionalError(job.resolveSignalExternalWorkflow.failure);
+    }
+    if (job.resolveChildWorkflowExecution?.result?.failed) {
+      job.resolveChildWorkflowExecution.result.failed.failure = optionalFailureToOptionalError(
+        job.resolveChildWorkflowExecution.result.failed.failure
+      );
+    }
+    if (job.resolveChildWorkflowExecution?.result?.cancelled) {
+      job.resolveChildWorkflowExecution.result.cancelled.failure = optionalFailureToOptionalError(
+        job.resolveChildWorkflowExecution.result.cancelled.failure
+      );
+    }
+    if (job.resolveRequestCancelExternalWorkflow) {
+      job.resolveRequestCancelExternalWorkflow.failure = optionalFailureToOptionalError(
+        job.resolveRequestCancelExternalWorkflow.failure
+      );
+    }
+  });
 }
 
 /**

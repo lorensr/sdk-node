@@ -12,6 +12,7 @@ import {
   ApplicationFailure,
   errorMessage,
   Deserialized,
+  convertFailuresToErrors,
 } from '@temporalio/common';
 import type { coresdk } from '@temporalio/proto/lib/coresdk';
 import { WorkflowInfo } from './interfaces';
@@ -177,6 +178,9 @@ export async function activate(
   activation: Deserialized<coresdk.workflow_activation.WFActivation>,
   batchIndex: number
 ): Promise<ActivationResult> {
+  // Create Error objects in the vm so that instanceof works inside Workflows
+  convertFailuresToErrors(activation);
+
   const intercept = composeInterceptors(
     state.interceptors.internals,
     'activate',

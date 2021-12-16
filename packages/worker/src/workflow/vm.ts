@@ -193,8 +193,9 @@ export class VMWorkflow implements Workflow {
         failed: { failure: await errorToFailure(this.unhandledRejection, this.dataConverter) },
       }).finish();
     }
+    console.log('completion:', completion.successful?.commands?.[0]);
     const serializedCompletion = await this.serializer.serializeCompletion(completion);
-    // console.log('serializedCompletion:', serializedCompletion.successful?.commands?.[0]);
+    console.log('serializedCompletion:', serializedCompletion.successful?.commands?.[0]);
     return coresdk.workflow_completion.WFActivationCompletion.encodeDelimited(serializedCompletion).finish();
   }
 

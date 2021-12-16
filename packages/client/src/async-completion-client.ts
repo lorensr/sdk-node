@@ -112,7 +112,7 @@ export class AsyncCompletionClient {
       }
       throw new ActivityCompletionError(err.details || err.message);
     }
-    throw new ActivityCompletionError('Unexpeced failure');
+    throw new ActivityCompletionError('Unexpected failure');
   }
 
   /**

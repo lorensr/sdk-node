@@ -42,7 +42,7 @@ export type WorkflowExecution = temporal.api.common.v1.IWorkflowExecution;
  * Only exceptions that extend this class will be propagated to the caller.
  *
  * **Never extend this class or any of its derivatives.** They are to be used by the SDK code
- * only. Throw an instance {@link ApplicationFailure} to pass application specific errors between
+ * only. Throw an instance of {@link ApplicationFailure} to pass application-specific errors between
  * Workflows and Activities.
  *
  * Any unhandled exception thrown by an Activity or Workflow will be converted to an instance of
@@ -266,8 +266,7 @@ function workflowInclusiveInstanceOf(instance: unknown, type: Function): boolean
 export async function errorToFailure(err: unknown, dataConverter: DataConverter): Promise<ProtoFailure> {
   if (workflowInclusiveInstanceOf(err, TemporalFailure)) {
     const error = err as TemporalFailure;
-    // TODO okay?
-    if (error.failure) return error.failure as ProtoFailure;
+    if (error.failure) return serializeFailure(error.failure, dataConverter);
 
     const base = {
       message: error.message,
@@ -437,8 +436,32 @@ export async function serializeFailure(
   failure: DeserializedFailure,
   dataConverter: DataConverter
 ): Promise<ProtoFailure> {
-  //TODO test
-  return failure as ProtoFailure;
+  const serializedFailure = failure as ProtoFailure;
+  if (failure.cause) {
+    await serializeFailure(failure.cause, dataConverter);
+  }
+
+  if (failure.applicationFailureInfo?.details?.payloads?.length) {
+    serializedFailure.applicationFailureInfo!.details!.payloads = await dataConverter.toPayloads(
+      ...failure.applicationFailureInfo.details.payloads
+    );
+  }
+  if (failure.timeoutFailureInfo?.lastHeartbeatDetails?.payloads?.length) {
+    serializedFailure.timeoutFailureInfo!.lastHeartbeatDetails!.payloads = await dataConverter.toPayloads(
+      ...failure.timeoutFailureInfo.lastHeartbeatDetails.payloads
+    );
+  }
+  if (failure.canceledFailureInfo?.details?.payloads?.length) {
+    serializedFailure.canceledFailureInfo!.details!.payloads = await dataConverter.toPayloads(
+      ...failure.canceledFailureInfo.details.payloads
+    );
+  }
+  if (failure.resetWorkflowFailureInfo?.lastHeartbeatDetails?.payloads?.length) {
+    serializedFailure.resetWorkflowFailureInfo!.lastHeartbeatDetails!.payloads = await dataConverter.toPayloads(
+      ...failure.resetWorkflowFailureInfo.lastHeartbeatDetails.payloads
+    );
+  }
+  return serializedFailure;
 }
 
 export function convertFailuresToErrors(activation: Deserialized<coresdk.workflow_activation.WFActivation>): void {

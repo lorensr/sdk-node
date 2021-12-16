@@ -43,7 +43,7 @@ if (RUN_INTEGRATION_TESTS) {
       logger: new DefaultLogger('ERROR', (entry) => {
         if (
           entry.message === 'Failed to activate workflow' &&
-          entry.meta?.error?.stack?.includes('Activator.startWorkflow') &&
+          entry.meta?.error?.stack?.includes('activate') &&
           entry.meta?.error?.message ===
             'Unable to deserialize protobuf message without protobufClasses provided to DefaultDataConverter'
         ) {
@@ -68,9 +68,14 @@ if (RUN_INTEGRATION_TESTS) {
       workflowId: uuid4(),
       taskQueue,
     });
-    await receivedExpectedError;
-    worker.shutdown();
-    t.pass();
+    try {
+      await Promise.race([receivedExpectedError, new Promise((_, reject) => setTimeout(reject, 100))]);
+      t.pass();
+    } catch (_) {
+      t.fail();
+    } finally {
+      worker.shutdown();
+    }
 
     // const runAndShutdown = async () => {
     //   const result = await client.execute(protobufWorkflow, {

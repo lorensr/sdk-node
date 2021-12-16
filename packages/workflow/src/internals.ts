@@ -8,6 +8,7 @@ import {
   Headers,
   checkExtends,
   Deserialized,
+  ApplicationFailure,
 } from '@temporalio/common';
 import type { coresdk } from '@temporalio/proto/lib/coresdk';
 import { alea, RNG } from './alea';
@@ -358,11 +359,16 @@ export class State {
   public blockedConditions = new Map<number, Condition>();
 
   /**
-   * Is this Workflow completed
+   * Is this Workflow completed?
+   *
+   * A Workflow will be considered completed if it generates a command that the
+   * system considers as a final Workflow command (e.g.
+   * completeWorkflowExecution or failWorkflowExecution).
    */
   public completed = false;
+
   /**
-   * Was this Workflow cancelled
+   * Was this Workflow cancelled?
    */
   public cancelled = false;
 
@@ -478,10 +484,19 @@ export async function handleWorkflowFailure(error: unknown): Promise<void> {
   } else if (error instanceof ContinueAsNew) {
     state.pushCommand({ continueAsNewWorkflowExecution: error.command }, true);
   } else {
+    const failure = ensureTemporalFailure(error);
+    if (failure instanceof ApplicationFailure) {
+      if (!failure.nonRetryable) {
+        // This results in an unhandled rejection which will fail the activation
+        // preventing it from completing.
+        throw error;
+      }
+    }
+
     state.pushCommand(
       {
         failWorkflowExecution: {
-          failure: ensureTemporalFailure(error),
+          failure,
         },
       },
       true

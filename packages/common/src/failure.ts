@@ -117,8 +117,8 @@ export class ApplicationFailure extends TemporalFailure {
    * @param details optional details about the failure. They are serialized using the same approach
    *     as arguments and results.
    */
-  public static retryable(message: string | undefined, type: string, ...details: unknown[]): ApplicationFailure {
-    return new this(message, type, false, details);
+  public static retryable(message: string | undefined, type?: string, ...details: unknown[]): ApplicationFailure {
+    return new this(message, type ?? 'Error', false, details);
   }
 
   /**
@@ -132,8 +132,8 @@ export class ApplicationFailure extends TemporalFailure {
    * @param details optional details about the failure. They are serialized using the same approach
    *     as arguments and results.
    */
-  public static nonRetryable(message: string | undefined, type: string, ...details: unknown[]): ApplicationFailure {
-    return new this(message, type, true, details);
+  public static nonRetryable(message: string | undefined, type?: string, ...details: unknown[]): ApplicationFailure {
+    return new this(message, type ?? 'Error', true, details);
   }
 }
 

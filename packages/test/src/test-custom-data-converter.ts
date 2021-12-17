@@ -1,14 +1,14 @@
 import { Connection, WorkflowClient } from '@temporalio/client';
 import { coresdk } from '@temporalio/proto';
-import { Core, DefaultLogger, Worker } from '@temporalio/worker';
+import { Worker } from '@temporalio/worker';
 import test, { ExecutionContext } from 'ava';
 import { v4 as uuid4 } from 'uuid';
 import { ProtoActivityInput } from '../protos/protobufs';
 import { protoActivity } from './activities';
-import { dataConverter, messageInstance } from './data-converters/data-converter';
+import { dataConverter, messageInstance, resultMessageInstance } from './data-converters/data-converter';
 import { cleanStackTrace, RUN_INTEGRATION_TESTS } from './helpers';
 import { defaultOptions, isolateFreeWorker } from './mock-native-worker';
-import { protobufWorkflow } from './workflows';
+import { protobufExample } from './workflows';
 
 export async function runWorker(worker: Worker, fn: () => Promise<any>): Promise<void> {
   const promise = worker.run();
@@ -34,25 +34,7 @@ function compareCompletion(
 
 if (RUN_INTEGRATION_TESTS) {
   test('Client and Worker work with provided dataConverter/dataConverterPath', async (t) => {
-    let resolvePromise: (value: unknown) => void;
-    const receivedExpectedError = new Promise(function (resolve) {
-      resolvePromise = resolve;
-    });
-
-    await Core.install({
-      logger: new DefaultLogger('ERROR', (entry) => {
-        if (
-          entry.message === 'Failed to activate workflow' &&
-          entry.meta?.error?.stack?.includes('activate') &&
-          entry.meta?.error?.message ===
-            'Unable to deserialize protobuf message without protobufClasses provided to DefaultDataConverter'
-        ) {
-          resolvePromise(true);
-        }
-      }),
-    });
-
-    const taskQueue = 'custom-data-converter';
+    const taskQueue = `custom-data-converter-${uuid4()}`;
     const worker = await Worker.create({
       ...defaultOptions,
       taskQueue,
@@ -61,32 +43,16 @@ if (RUN_INTEGRATION_TESTS) {
     const connection = new Connection();
     const client = new WorkflowClient(connection.service, { dataConverter });
 
-    // For now, just check that the protobuf message gets to the workflow
-    worker.run();
-    client.execute(protobufWorkflow, {
-      args: [messageInstance],
-      workflowId: uuid4(),
-      taskQueue,
-    });
-    try {
-      await Promise.race([receivedExpectedError, new Promise((_, reject) => setTimeout(reject, 100))]);
-      t.pass();
-    } catch (_) {
-      t.fail();
-    } finally {
+    const runAndShutdown = async () => {
+      const result = await client.execute(protobufExample, {
+        args: [messageInstance],
+        workflowId: uuid4(),
+        taskQueue,
+      });
+      t.deepEqual(result, resultMessageInstance);
       worker.shutdown();
-    }
-
-    // const runAndShutdown = async () => {
-    //   const result = await client.execute(protobufWorkflow, {
-    //     args: [messageInstance],
-    //     workflowId: uuid4(),
-    //     taskQueue,
-    //   });
-    //   t.is(result, messageInstance);
-    //   worker.shutdown();
-    // };
-    // await Promise.all([worker.run(), runAndShutdown()]);
+    };
+    await Promise.all([worker.run(), runAndShutdown()]);
   });
 }
 

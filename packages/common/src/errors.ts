@@ -6,6 +6,10 @@ export class DataConverterError extends Error {
   public readonly name: string = 'DataConverterError';
 }
 
+export class UnsupportedTypeError extends DataConverterError {
+  public readonly name: string = 'UnsupportedTypeError';
+}
+
 /**
  * Used in different parts of the project to signal that something unexpected has happened
  */

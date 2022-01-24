@@ -1,9 +1,10 @@
-import { ValueError, DataConverterError } from '../errors';
+import { ValueError, DataConverterError, UnsupportedTypeError } from '../errors';
 import {
   u8,
   str,
   Payload,
   encodingTypes,
+  EncodingType,
   encodingKeys,
   METADATA_ENCODING_KEY,
   METADATA_MESSAGE_TYPE_KEY,
@@ -12,86 +13,20 @@ import { isRecord, hasOwnProperty, hasOwnProperties } from '../type-helpers';
 import { errorMessage } from '../errors';
 import * as protoJsonSerializer from 'proto3-json-serializer';
 import type { Root, Type, Namespace, Message } from 'protobufjs';
+import { DataConverter } from './data-converter';
 
-/**
- * Used by the framework to serialize/deserialize method parameters that need to be sent over the
- * wire.
- *
- * @author fateev
- */
-export interface PayloadConverter {
-  encodingType: string;
-
-  /**
-   * TODO: Fix comment in https://github.com/temporalio/sdk-java/blob/85593dbfa99bddcdf54c7196d2b73eeb23e94e9e/temporal-sdk/src/main/java/io/temporal/common/converter/DataConverter.java#L46
-   * Implements conversion of value to payload
-   *
-   * @param value JS value to convert.
-   * @return converted value or `undefined` if unable to convert.
-   * @throws DataConverterException if conversion of the value passed as parameter failed for any
-   *     reason.
-   */
-  toData(value: unknown): Promise<Payload | undefined>;
-
-  /**
-   * Implements conversion of payload to value.
-   *
-   * @param content Serialized value to convert to a JS value.
-   * @return converted JS value
-   * @throws DataConverterException if conversion of the data passed as parameter failed for any
-   *     reason.
-   */
-  fromData<T>(content: Payload): Promise<T>;
-
-  /**
-   * Synchronous version of {@link toData}, used in the Workflow runtime because
-   * the async version limits the functionality of the runtime.
-   *
-   * Implements conversion of value to payload
-   *
-   * @param value JS value to convert.
-   * @return converted value or `undefined` if unable to convert.
-   * @throws DataConverterException if conversion of the value passed as parameter failed for any
-   *     reason.
-   */
-  toDataSync(value: unknown): Payload | undefined;
-
-  /**
-   * Synchronous version of {@link fromData}, used in the Workflow runtime because
-   * the async version limits the functionality of the runtime.
-   *
-   * Implements conversion of payload to value.
-   *
-   * @param content Serialized value to convert to a JS value.
-   * @return converted JS value
-   * @throws DataConverterException if conversion of the data passed as parameter failed for any
-   *     reason.
-   */
-  fromDataSync<T>(content: Payload): T;
-}
-
-export abstract class AsyncFacadePayloadConverter implements PayloadConverter {
-  abstract encodingType: string;
-  abstract toDataSync(value: unknown): Payload | undefined;
-  abstract fromDataSync<T>(content: Payload): T;
-
-  public async toData(value: unknown): Promise<Payload | undefined> {
-    return this.toDataSync(value);
-  }
-
-  public async fromData<T>(content: Payload): Promise<T> {
-    return this.fromDataSync(content);
-  }
+export abstract class DataConverterWithEncoding extends DataConverter {
+  abstract readonly encodingType: EncodingType;
 }
 
 /**
  * Converts between JS undefined and NULL Payload
  */
-export class UndefinedPayloadConverter extends AsyncFacadePayloadConverter {
+export class UndefinedDataConverter extends DataConverterWithEncoding {
   public encodingType = encodingTypes.METADATA_ENCODING_NULL;
 
-  public toDataSync(value: unknown): Payload | undefined {
-    if (value !== undefined) return undefined; // Can't encode
+  public toPayload(value: unknown): Payload {
+    if (value !== undefined) throw new UnsupportedTypeError(); // Can't encode
     return {
       metadata: {
         [METADATA_ENCODING_KEY]: encodingKeys.METADATA_ENCODING_NULL,
@@ -99,7 +34,7 @@ export class UndefinedPayloadConverter extends AsyncFacadePayloadConverter {
     };
   }
 
-  public fromDataSync<T>(_content: Payload): T {
+  public fromPayload<T>(_content: Payload): T {
     return undefined as any; // Just return undefined
   }
 }
@@ -107,11 +42,11 @@ export class UndefinedPayloadConverter extends AsyncFacadePayloadConverter {
 /**
  * Converts between non-undefined values and serialized JSON Payload
  */
-export class JsonPayloadConverter extends AsyncFacadePayloadConverter {
+export class JsonDataConverter extends DataConverterWithEncoding {
   public encodingType = encodingTypes.METADATA_ENCODING_JSON;
 
-  public toDataSync(value: unknown): Payload | undefined {
-    if (value === undefined) return undefined; // Should be encoded with the UndefinedPayloadConverter
+  public toPayload(value: unknown): Payload {
+    if (value === undefined) throw new UnsupportedTypeError(); // Should be encoded with the UndefinedDataConverter
     return {
       metadata: {
         [METADATA_ENCODING_KEY]: encodingKeys.METADATA_ENCODING_JSON,
@@ -120,7 +55,7 @@ export class JsonPayloadConverter extends AsyncFacadePayloadConverter {
     };
   }
 
-  public fromDataSync<T>(content: Payload): T {
+  public fromPayload<T>(content: Payload): T {
     if (content.data === undefined || content.data === null) {
       throw new ValueError('Got payload with no data');
     }
@@ -131,13 +66,13 @@ export class JsonPayloadConverter extends AsyncFacadePayloadConverter {
 /**
  * Converts between binary data types and RAW Payload
  */
-export class BinaryPayloadConverter extends AsyncFacadePayloadConverter {
+export class BinaryDataConverter extends DataConverterWithEncoding {
   public encodingType = encodingTypes.METADATA_ENCODING_RAW;
 
-  public toDataSync(value: unknown): Payload | undefined {
+  public toPayload(value: unknown): Payload {
     // TODO: support any DataView or ArrayBuffer?
     if (!(value instanceof Uint8Array)) {
-      return undefined;
+      throw new UnsupportedTypeError();
     }
     return {
       metadata: {
@@ -147,14 +82,15 @@ export class BinaryPayloadConverter extends AsyncFacadePayloadConverter {
     };
   }
 
-  public fromDataSync<T>(content: Payload): T {
+  public fromPayload<T>(content: Payload): T {
     // TODO: support any DataView or ArrayBuffer?
     return content.data as any;
   }
 }
 
-abstract class ProtobufPayloadConverter extends AsyncFacadePayloadConverter {
+abstract class ProtobufDataConverter extends DataConverterWithEncoding {
   protected readonly root: Root | undefined;
+  public abstract encodingType: EncodingType;
 
   // Don't use type Root here because root.d.ts doesn't export Root, so users would have to type assert
   constructor(root?: unknown) {
@@ -211,16 +147,16 @@ abstract class ProtobufPayloadConverter extends AsyncFacadePayloadConverter {
 /**
  * Converts between protobufjs Message instances and serialized Protobuf Payload
  */
-export class ProtobufBinaryPayloadConverter extends ProtobufPayloadConverter {
+export class ProtobufBinaryDataConverter extends ProtobufDataConverter {
   public encodingType = encodingTypes.METADATA_ENCODING_PROTOBUF;
 
   constructor(root?: unknown) {
     super(root);
   }
 
-  public toDataSync(value: unknown): Payload | undefined {
+  public toPayload(value: unknown): Payload {
     if (!isProtobufMessage(value)) {
-      return undefined;
+      throw new UnsupportedTypeError();
     }
 
     return this.constructPayload({
@@ -229,7 +165,7 @@ export class ProtobufBinaryPayloadConverter extends ProtobufPayloadConverter {
     });
   }
 
-  public fromDataSync<T>(content: Payload): T {
+  public fromPayload<T>(content: Payload): T {
     const { messageType, data } = this.validatePayload(content);
     return messageType.decode(data) as unknown as T;
   }
@@ -238,16 +174,16 @@ export class ProtobufBinaryPayloadConverter extends ProtobufPayloadConverter {
 /**
  * Converts between protobufjs Message instances and serialized JSON Payload
  */
-export class ProtobufJsonPayloadConverter extends ProtobufPayloadConverter {
+export class ProtobufJsonDataConverter extends ProtobufDataConverter {
   public encodingType = encodingTypes.METADATA_ENCODING_PROTOBUF_JSON;
 
   constructor(root?: unknown) {
     super(root);
   }
 
-  public toDataSync(value: unknown): Payload | undefined {
+  public toPayload(value: unknown): Payload {
     if (!isProtobufMessage(value)) {
-      return undefined;
+      throw new UnsupportedTypeError();
     }
 
     const jsonValue = protoJsonSerializer.toProto3JSON(value);
@@ -258,7 +194,7 @@ export class ProtobufJsonPayloadConverter extends ProtobufPayloadConverter {
     });
   }
 
-  public fromDataSync<T>(content: Payload): T {
+  public fromPayload<T>(content: Payload): T {
     const { messageType, data } = this.validatePayload(content);
     return protoJsonSerializer.fromProto3JSON(messageType, JSON.parse(str(data))) as unknown as T;
   }
